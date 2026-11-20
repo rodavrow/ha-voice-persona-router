@@ -15,7 +15,7 @@ It sits in front of a conversation agent you already have (any LLM agent). For e
 
 It can also run Home Assistant's built-in quick commands ("turn off the kitchen lights") only for recognised speakers.
 
-Optionally, each assistant **remembers things about the people who live here**: what they ask it to remember, and lasting facts that come up in conversation. What it remembers about a person is only used when that person is speaking. See [Memory](#memory).
+Optionally, each assistant **remembers things about the people who live here**: what they ask it to remember, and lasting facts that come up in conversation. Like a person would, it knows what either of you told it, so one of you can leave a message for the other, and it keeps a fact to one person when asked. See [Memory](#memory).
 
 Everything is set on a settings screen in the Home Assistant UI. There is no YAML to edit for the router itself.
 
@@ -111,6 +111,7 @@ Changes apply to the next request. No restart is needed.
 | | Save important facts without being asked | When off, only "remember" and "forget" requests change the memory. |
 | | Most facts kept per list | 10 to 200, default 50. Also the most facts shown to the main agent. |
 | | Use the lists shared by all assistants | Read the shared lists, and save to them when the person asks for all assistants to remember something. |
+| | Share what each person tells it with the other person | On by default. The assistant knows what either person told it, whoever is speaking, except facts a person asked to keep private. When off, a person's facts are only used when that person speaks. |
 | **Person 1**, **Person 2** | Name | Put in front of that person's messages in the shared history. |
 | | Persona | Instructions added to the main agent's prompt when that person speaks. |
 | **Unknown voices** | How to answer | A refusal written by an agent without tools, or fixed lines only. |
@@ -149,11 +150,14 @@ We have not been introduced, so the answer is no.
 
 ## Memory
 
-With memory on, an assistant remembers facts about Person 1 and Person 2 and is told them again each time that person speaks.
+With memory on, an assistant remembers what Person 1 and Person 2 tell it, and is told those facts again each time one of them speaks.
 
 ### What is remembered, and for whom
 
-- **Per person.** Every fact belongs to the person who was speaking when it was saved. When Person 1 speaks, the assistant is told Person 1's facts and none of Person 2's.
+- **Shared between the two of you.** A real person remembers what anyone tells them, and so does the assistant: what Person 1 told it is also known when Person 2 speaks, and the other way round. Every fact is kept on the list of the person who said it, so the assistant knows who told it what.
+- **Messages for each other.** "Tell Sam the plumber comes on Friday" is saved as a fact, and the assistant knows it the next time Sam speaks. It stays until someone asks to forget it or deletes it from the list.
+- **Private on request.** If the person asks to keep something from the other person ("just between us", "don't tell Sam", "it's a secret"), the fact is marked private and is only used when the person who said it speaks. To keep everything per person, switch off "Share what each person tells it with the other person".
+- **Each person forgets their own.** "Forget…" removes matching facts from the lists of the person speaking. To remove something the other person told it, use the editor below.
 - **Per assistant by default.** A fact told to one router is only known to that router. If you have a kitchen assistant and an office assistant, each keeps its own lists.
 - **For all assistants on request.** If the person says so ("remember for all the assistants that I am vegetarian", "everyone should know…"), the fact goes on a list shared by every router.
 - **Told or judged.** "Remember that…" always saves. With "Save important facts without being asked" on, lasting facts that come up in conversation are saved as well: preferences, people, plans with dates, routines. "Forget…" removes matching facts.
@@ -168,6 +172,7 @@ Open the router's **Configure**, choose **Memory**, and pick a list, for example
 - delete a line to forget it
 - change a line to correct it
 - type a new line to add a fact
+- start a line with `(private)` to keep that fact from the other person, or delete the mark to share it
 
 Saving returns to the menu, so you can go on to another list. The lists shared by all assistants can be edited from any router. This works even when memory is switched off.
 
@@ -213,6 +218,8 @@ The near-miss reply needs a sensor on the satellite's device whose entity id end
 - **Only assistants that use the router are covered.** Any other voice assistant you have set up is unaffected.
 - **Memory costs a second model call.** With memory on, the memory agent is called after each conversational turn (not for built-in commands or very short requests). That adds cost, not waiting time. With "Save important facts without being asked" off it is only called for remember and forget requests.
 - **Remembered facts are only as good as the memory agent's judgement.** It can save something trivial, miss something important or word a fact wrongly. Check the lists now and then under Configure > Memory.
+- **Private relies on the memory agent.** It has to notice that the person asked to keep something private. If it misses that, the fact is shared. Check the list, or add the fact yourself with `(private)` in front. Anyone who can open the router's Configure dialog can read every list, private facts included.
+- **A shared satellite has a shared history.** Within one ongoing conversation the main agent also sees what was said earlier in it, whoever said it. Private only governs what is brought back from memory later.
 - **Remember and forget requests are recognised in English.** With auto-save off, a request in another language is not picked up.
 - English is the only translation of the settings screen.
 
@@ -236,6 +243,7 @@ The router sends nothing anywhere by itself. It has no telemetry, no analytics a
 - **Settings.** Names, personas, instructions and fixed lines are saved in Home Assistant's own configuration storage (`.storage/core.config_entries`), the same place as every other integration's settings.
 - **Shared history.** Messages from Person 1 and Person 2 stay in Home Assistant's conversation history with their name in front, the same as with any other agent. Exchanges with unknown voices are removed from it.
 - **Logs.** With debug logging on, the router writes the text of each spoken request to the Home Assistant log. Turn debug logging off again when you are done, and check the log before you share it in a bug report.
+- **Memory between people.** With sharing on (the default), what one person tells the assistant is used when the other person speaks, unless they asked to keep it private. Tell the people in your home that this is how it works.
 - **Memory.** With memory on, each exchange with a recognised person (their words and the assistant's reply), together with what is already remembered about them, is sent to the memory agent you chose. If that is a cloud LLM, it leaves your network under that provider's terms. The remembered facts are stored unencrypted in `.storage/voice_persona_router.memory` and are included in Home Assistant backups. With debug logging on, saved and removed facts are written to the log.
 - **Voice data.** The router never sees audio or voiceprints. Speaker recognition happens on your satellite. The router only reads the role (`owner`, `partner`, `stranger`, `pending`) from your helper and, for near misses, the score sensor.
 

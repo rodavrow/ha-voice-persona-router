@@ -59,6 +59,7 @@ SCRIPT_TIMEOUT = 8
 REPLY_AGENT_TIMEOUT = 6
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
+OTHER_PERSON = {"owner": "wife", "wife": "owner"}
 
 
 def _lines(text):
@@ -207,19 +208,38 @@ class PersonaRouter(conversation.ConversationEntity):
             (self._main_agent(), self.entity_id, *router_agent_ids(self.hass)),
         )
 
+    def _person_name(self, person) -> str:
+        section = self._entry.options.get(SETTINGS_KEY[person]) or {}
+        return str(section.get("name") or "").strip()
+
     def _memory_block(self, who, name, settings: MemorySettings) -> str:
         """What this assistant remembers about one person. Reads memory only, no I/O."""
         try:
             memory = get_loaded_memory(self.hass)
             if memory is None:
                 return ""
-            shared = memory.items(global_key(who)) if settings.use_global else []
-            return memory_block(
-                name,
-                memory.items(entry_key(self._entry.entry_id, who)),
-                shared,
-                max_items=settings.max_items,
-            )
+
+            def lists(person, shareable_only=False):
+                found = [memory.items(entry_key(self._entry.entry_id, person))]
+                found.append(memory.items(global_key(person)) if settings.use_global else [])
+                if shareable_only:
+                    found = [[i for i in items if not i.get("private")] for items in found]
+                return found
+
+            blocks = [memory_block(name, *lists(who), max_items=settings.max_items)]
+            if settings.shared:
+                # What the other named person told this assistant, unless they asked
+                # to keep it private.
+                other = OTHER_PERSON[who]
+                blocks.append(
+                    memory_block(
+                        self._person_name(other),
+                        *lists(other, shareable_only=True),
+                        max_items=settings.max_items,
+                        other=True,
+                    )
+                )
+            return "\n\n".join(block for block in blocks if block)
         except Exception:  # noqa: BLE001 - memory must never cost the person their persona
             _LOGGER.exception("Could not read memory, answering without it")
             return ""
@@ -245,6 +265,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 entry_id=self._entry.entry_id,
                 person=resp["who"],
                 name=str(resp.get("label") or ""),
+                other_name=self._person_name(OTHER_PERSON[resp["who"]]),
                 user_text=user_input.text,
                 reply_text=str((result.response.speech.get("plain") or {}).get("speech") or ""),
                 language=user_input.language,

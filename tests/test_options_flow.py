@@ -20,7 +20,13 @@ from custom_components.voice_persona_router.memory import (
 
 MAIN_AGENT = "conversation.home_assistant"
 MEMORY_AGENT = "conversation.memory_writer"
-MEMORY_DEFAULTS = {"enabled": False, "auto_save": True, "max_items": 50, "use_global": True}
+MEMORY_DEFAULTS = {
+    "enabled": False,
+    "auto_save": True,
+    "max_items": 50,
+    "use_global": True,
+    "shared": True,
+}
 EXISTING_OPTIONS = {
     "agents": {"agent": MAIN_AGENT},
     "local": {"enabled": True, "leave_questions": False},

@@ -18,10 +18,17 @@ from .memory import (
     async_get_memory,
     entry_key,
     global_key,
+    item_line,
     router_agent_ids,
 )
 
-MEMORY_DEFAULTS = {"enabled": False, "auto_save": True, "max_items": 50, "use_global": True}
+MEMORY_DEFAULTS = {
+    "enabled": False,
+    "auto_save": True,
+    "max_items": 50,
+    "use_global": True,
+    "shared": True,
+}
 LINE_PREVIEW_LENGTH = 60
 
 DEFAULT_NEAR_PERSONA = (
@@ -160,6 +167,7 @@ def settings_schema(current):
                         _fixed("auto_save", memory, True): selector.BooleanSelector(),
                         _fixed("max_items", memory, 50): _number(10, 200, 1),
                         _fixed("use_global", memory, True): selector.BooleanSelector(),
+                        _fixed("shared", memory, True): selector.BooleanSelector(),
                     }
                 ),
                 {"collapsed": True},
@@ -335,7 +343,7 @@ class PersonaRouterOptionsFlow(OptionsFlow):
         """Edit one list, one fact per line. Saving never touches the entry's options."""
         errors = {}
         placeholders = {"list": self._list_label}
-        text = "\n".join(item["text"] for item in self._shown)
+        text = "\n".join(item_line(item) for item in self._shown)
         if user_input is not None:
             text = str(user_input.get("facts") or "")
             memory = await async_get_memory(self.hass)

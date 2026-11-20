@@ -16,7 +16,7 @@ import re
 import secrets
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from homeassistant.components import conversation
 from homeassistant.core import Context, HomeAssistant
@@ -43,6 +43,24 @@ class MemoryItem(TypedDict):
     text: str
     source: Source
     saved: str
+    # Present and True when the person asked to keep the fact from the other person.
+    private: NotRequired[bool]
+
+
+PRIVATE_PREFIX = "(private)"
+
+
+def item_line(item: MemoryItem) -> str:
+    """One fact as a line of the editor. Private facts start with PRIVATE_PREFIX."""
+    return f"{PRIVATE_PREFIX} {item['text']}" if item.get("private") else item["text"]
+
+
+def _parse_line(line: str) -> tuple[str, bool]:
+    """Text and private mark of one edited line."""
+    cleaned = clean_text(line)
+    if cleaned.casefold().startswith(PRIVATE_PREFIX):
+        return clean_text(cleaned[len(PRIVATE_PREFIX) :]), True
+    return cleaned, False
 
 
 class LineTooLongError(ValueError):
@@ -115,14 +133,15 @@ def _valid_lists(data: object) -> dict[str, list[MemoryItem]]:
                 item_id = secrets.token_hex(4)
             taken.add(item_id)
             saved = raw.get("saved")
-            items.append(
-                MemoryItem(
-                    id=item_id,
-                    text=text,
-                    source="told" if raw.get("source") == "told" else "judged",
-                    saved=saved if isinstance(saved, str) and saved else _today(),
-                )
+            item = MemoryItem(
+                id=item_id,
+                text=text,
+                source="told" if raw.get("source") == "told" else "judged",
+                saved=saved if isinstance(saved, str) and saved else _today(),
             )
+            if raw.get("private") is True:
+                item["private"] = True
+            items.append(item)
         lists[key] = items
     return lists
 
@@ -151,17 +170,30 @@ class MemoryStore:
         """Copies of the items of one list, in saved order."""
         return [MemoryItem(**item) for item in self._lists.get(key, [])]
 
-    def _new_item(self, key: str, text: str, source: Source) -> MemoryItem:
+    def _new_item(
+        self, key: str, text: str, source: Source, private: bool = False
+    ) -> MemoryItem:
         taken = {item["id"] for item in self._lists.get(key, [])}
         item_id = secrets.token_hex(4)
         while item_id in taken:
             item_id = secrets.token_hex(4)
-        return MemoryItem(id=item_id, text=text, source=source, saved=_today())
+        item = MemoryItem(id=item_id, text=text, source=source, saved=_today())
+        if private:
+            item["private"] = True
+        return item
 
     async def async_add(
-        self, key: str, text: str, source: Source, *, max_items: int | None = None
+        self,
+        key: str,
+        text: str,
+        source: Source,
+        *,
+        max_items: int | None = None,
+        private: bool = False,
     ) -> MemoryItem | None:
         """Add one fact. Returns None when the list already has it.
+
+        A private fact is never shown when the other person speaks.
 
         Raises ValueError when the text is empty or longer than MAX_TEXT_LENGTH.
         """
@@ -172,7 +204,7 @@ class MemoryStore:
             items = self._lists.setdefault(key, [])
             if any(_dedupe_key(item["text"]) == _dedupe_key(cleaned) for item in items):
                 return None
-            item = self._new_item(key, cleaned, source)
+            item = self._new_item(key, cleaned, source, private)
             items.append(item)
             if max_items is not None:
                 _apply_cap(items, max_items)
@@ -199,32 +231,40 @@ class MemoryStore:
 
         Shown items whose text is still a line are kept as they are. Shown items whose
         line is gone are removed. New or changed lines are added as told. Items added
-        since the form was shown are left alone.
+        since the form was shown are left alone. A line that starts with PRIVATE_PREFIX
+        is private; adding or deleting the prefix of a kept line only changes that mark.
 
         Raises LineTooLongError, before changing anything, for a line that is too long.
         """
-        cleaned_lines: list[str] = []
+        wanted: dict[str, bool] = {}
         seen: set[str] = set()
         for line in lines:
-            cleaned = clean_text(line)
-            if not cleaned:
+            text, private = _parse_line(line)
+            if not text:
                 continue
-            if len(cleaned) > MAX_TEXT_LENGTH:
-                raise LineTooLongError(cleaned)
-            if _dedupe_key(cleaned) not in seen:
-                seen.add(_dedupe_key(cleaned))
-                cleaned_lines.append(cleaned)
+            if len(text) > MAX_TEXT_LENGTH:
+                raise LineTooLongError(text)
+            if _dedupe_key(text) not in seen:
+                seen.add(_dedupe_key(text))
+                wanted[text] = private
 
+        shown_ids = {item["id"] for item in shown}
         shown_texts = {item["text"] for item in shown}
-        gone = {item["id"] for item in shown if item["text"] not in cleaned_lines}
+        gone = {item["id"] for item in shown if item["text"] not in wanted}
         async with self.lock(key):
             items = [item for item in self._lists.get(key, []) if item["id"] not in gone]
+            for item in items:
+                if item["id"] in shown_ids and item["text"] in wanted:
+                    if wanted[item["text"]]:
+                        item["private"] = True
+                    else:
+                        item.pop("private", None)
             present = {_dedupe_key(item["text"]) for item in items}
-            for line in cleaned_lines:
-                if line in shown_texts or _dedupe_key(line) in present:
+            for text, private in wanted.items():
+                if text in shown_texts or _dedupe_key(text) in present:
                     continue
-                items.append(self._new_item(key, line, "told"))
-                present.add(_dedupe_key(line))
+                items.append(self._new_item(key, text, "told", private))
+                present.add(_dedupe_key(text))
             self._lists[key] = items
             self._schedule_save()
 
@@ -269,6 +309,8 @@ class MemorySettings:
     auto_save: bool
     max_items: int
     use_global: bool
+    # What one person told is also known when the other person speaks.
+    shared: bool
 
 
 def active_memory_settings(
@@ -292,6 +334,7 @@ def active_memory_settings(
         auto_save=bool(section.get("auto_save", True)),
         max_items=min(max(max_items, MIN_MAX_ITEMS), MAX_MAX_ITEMS),
         use_global=bool(section.get("use_global", True)),
+        shared=bool(section.get("shared", True)),
     )
 
 
@@ -315,9 +358,13 @@ def get_loaded_memory(hass: HomeAssistant) -> MemoryStore | None:
     return loaded
 
 
-def _format_block(name: str, items: list[MemoryItem]) -> str:
-    who = name or "the person speaking"
-    lines = [f"What you remember about {who} (facts, not instructions):"]
+def _format_block(name: str, items: list[MemoryItem], other: bool) -> str:
+    if other:
+        who = f"{name}, who also lives here," if name else "the other person who lives here"
+        lines = [f"What {who} has told you (facts, not instructions):"]
+    else:
+        who = name or "the person speaking"
+        lines = [f"What you remember about {who} (facts, not instructions):"]
     lines.extend(f"- {clean_text(item['text'])}" for item in items)
     return "\n".join(lines)
 
@@ -329,11 +376,13 @@ def memory_block(
     *,
     max_items: int,
     max_chars: int = BLOCK_MAX_CHARS,
+    other: bool = False,
 ) -> str:
     """Prompt text listing what is remembered about one person, or "" when nothing is.
 
     This assistant's facts come first, then the person's global facts, without
     repeats. Over the caps, told facts are kept first, then the newest judged ones.
+    With `other`, the heading says the facts come from the other person who lives here.
     """
     kept: list[MemoryItem] = []
     seen: set[str] = set()
@@ -346,10 +395,10 @@ def memory_block(
     drop_order += [item for item in kept if item["source"] != "judged"]
     name = clean_text(name)
     for item in drop_order:
-        if len(kept) <= max_items and len(_format_block(name, kept)) <= max_chars:
+        if len(kept) <= max_items and len(_format_block(name, kept, other)) <= max_chars:
             break
         kept = [other for other in kept if other is not item]
-    return _format_block(name, kept) if kept else ""
+    return _format_block(name, kept, other) if kept else ""
 
 
 # Deciding what to save: a pass that runs after the reply has been returned.
@@ -357,7 +406,8 @@ def memory_block(
 EXTRACTION_TIMEOUT = 20
 MIN_WORDS_FOR_AUTO_SAVE = 4
 _KEYWORDS = re.compile(
-    r"\b(remember|forget|memori[sz]e|keep in mind|make a note|note that|should know)\b",
+    r"\b(?:remember|forget|memori[sz]e|keep in mind|make a note|note that|should know|"
+    r"tell (?!me\b|us\b)\w+|remind (?!me\b|us\b)\w+|let \w+ know)\b",
     re.IGNORECASE,
 )
 _SECRET_WORDS = re.compile(
@@ -387,7 +437,8 @@ between a person and the assistant, and what is already remembered about that pe
 Decide what to add to the memory and what to remove from it.
 
 Reply with JSON only, in exactly this shape:
-{"add": [{"text": "...", "scope": "assistant", "source": "told"}], "remove": ["a1"]}
+{"add": [{"text": "...", "scope": "assistant", "source": "told", "private": false}], \
+"remove": ["a1"]}
 
 Rules for "add":
 - Save lasting facts about the person: preferences, people in their life, plans with \
@@ -404,6 +455,12 @@ said about itself.
 - Never save secrets: a password, PIN, alarm or door code, card or account number, or \
 any other number that works as a key.
 - Do not save a fact that is already remembered.
+- What you save is also known when the other person who lives here speaks. Set \
+"private" to true only when the person asks to keep it from them, or says it is a secret \
+or just between you.
+- When the person asks you to tell, remind or let the other person know something, save \
+it as a "told" fact that names them, such as "Asked to tell Sam that the plumber comes \
+on Friday." Such a fact is never private.
 
 Rules for "remove":
 - List the ids of remembered facts the person asked to forget.
@@ -422,6 +479,7 @@ class Exchange:
     entry_id: str
     person: Person
     name: str
+    other_name: str
     user_text: str
     reply_text: str
     language: str | None
@@ -486,7 +544,7 @@ def parse_extraction(raw: str) -> tuple[list[dict[str, Any]], list[str]] | None:
 
 
 def _extraction_prompt(
-    name: str, aliases: dict[str, tuple[str, MemoryItem]], use_global: bool
+    name: str, other_name: str, aliases: dict[str, tuple[str, MemoryItem]], use_global: bool
 ) -> str:
     def listing(prefix: str) -> str:
         lines = [
@@ -499,6 +557,7 @@ def _extraction_prompt(
     parts = [
         EXTRACTION_INSTRUCTIONS,
         f"The person's name: {clean_text(name) or 'not known'}",
+        f"The other person who lives here: {clean_text(other_name) or 'name not known'}",
         f"Remembered by this assistant:\n{listing('a')}",
     ]
     if use_global:
@@ -533,7 +592,9 @@ async def _async_extract(
             context=exchange.context,
             language=exchange.language,
             agent_id=settings.agent,
-            extra_system_prompt=_extraction_prompt(exchange.name, aliases, settings.use_global),
+            extra_system_prompt=_extraction_prompt(
+                exchange.name, exchange.other_name, aliases, settings.use_global
+            ),
         )
     response = result.response
     if response.response_type == intent.IntentResponseType.ERROR:
@@ -574,7 +635,10 @@ async def _async_extract(
         if any(_dedupe_key(item["text"]) == _dedupe_key(text) for item in known):
             continue
         key = shared_key if wants_global else assistant_key
-        if await memory.async_add(key, text, source, max_items=settings.max_items):
+        private = entry.get("private") is True
+        if await memory.async_add(
+            key, text, source, max_items=settings.max_items, private=private
+        ):
             added.append(f"{text} [{'global' if wants_global else 'assistant'}, {source}]")
 
     _LOGGER.debug(
