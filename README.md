@@ -94,6 +94,16 @@ Open the new entry and choose **Configure**. See [Settings](#settings) below.
 
 The last step matters. With that option on, Home Assistant runs its built-in commands before the router is asked anything, so an unknown voice could still switch things on and off. With it off, the router tries the built-in commands itself, and only for a recognised speaker.
 
+### Phone app and browser
+
+The phone app, the Assist chat window in the browser and other devices without a helper cannot match a voice. They do send the Home Assistant user who is logged in, so choose each person's **Home Assistant user** in the settings. For a request from a device without a helper, the router then works it out like this:
+
+1. Logged in as the user chosen for Person 1 or Person 2: that person.
+2. Logged in as any other user, once at least one person has a user chosen: an unknown voice, so a guest account gets a refusal.
+3. No user at all, or no users chosen in the settings: whatever "A device without speaker recognition is" says.
+
+A satellite with a helper is always decided by voice, whoever is logged in elsewhere.
+
 ## Settings
 
 Changes apply to the next request. No restart is needed.
@@ -104,6 +114,7 @@ Changes apply to the next request. No restart is needed.
 | **Built-in commands** | Try built-in commands first | A request that exactly matches one of Home Assistant's own commands is carried out at once, without the main agent. Recognised speakers only. |
 | | Leave questions and music searches to the main agent | State questions ("is the door closed") and play-music requests go to the main agent even when a built-in command matches. |
 | **Person 1**, **Person 2** | Name | Put in front of that person's messages in the shared history. |
+| | Home Assistant user | Requests from the phone app, the browser or any other device without a helper, made while logged in as this user, count as this person. See [Phone app and browser](#phone-app-and-browser). |
 | | Persona | Instructions added to the main agent's prompt when that person speaks. |
 | **Unknown voices** | How to answer | A refusal written by an agent without tools, or fixed lines only. |
 | | Agent that writes the refusal | Must have no tool providers, and may not be the main agent. |
@@ -114,7 +125,7 @@ Changes apply to the next request. No restart is needed.
 | | Instructions and fixed lines | The same idea as for unknown voices, for the try-again reply. |
 | **Advanced** | Shared history rule | Added to the main agent's prompt after the persona. Use it to explain the name labels. |
 | | Wait for the voice match | How long to wait while the helper says `pending`. If no match arrives in time, the voice counts as unknown. |
-| | A device without speaker recognition is | Who to assume for the phone app and any device with no helper. |
+| | A device without speaker recognition is | Who to assume for a device with no helper when no Home Assistant user decides it: nobody is logged in, or no user is chosen under Person 1 or Person 2. |
 
 ### Example texts
 
@@ -153,7 +164,7 @@ The near-miss reply needs a sensor on the satellite's device whose entity id end
 
 - **Sentence-trigger automations bypass the router.** Home Assistant runs automations with a sentence trigger before any conversation agent is asked.
 - **Voice triggers handled on the satellite itself bypass it too**, if your satellite firmware has them.
-- **Devices without a helper count as Person 1** unless you change "A device without speaker recognition is". That includes the Home Assistant phone app and the Assist chat window.
+- **Devices without a helper go by the logged-in user, not the voice.** Anyone using a phone that is logged in as Person 1 is treated as Person 1. If no users are chosen, these devices count as Person 1 unless you change "A device without speaker recognition is".
 - **Two people and strangers.** There are exactly two personas.
 - **If the lookup itself fails**, the router answers as the main agent without a persona.
 - **Built-in commands wait for the voice match** and are answered with a spoken reply, where Home Assistant on its own may only play a short acknowledge sound.
@@ -166,10 +177,21 @@ Turn on debug logging for the integration (the entry's menu > **Enable debug log
 
 | Problem | Likely cause |
 | --- | --- |
-| Everyone is treated as Person 1 | No helper exists with the device id of that satellite, so the "device without speaker recognition" setting applies. |
+| Everyone is treated as Person 1 | No helper exists with the device id of that satellite, so the "device without speaker recognition" setting applies. On the phone app or browser, choose each person's Home Assistant user in the settings. |
+| The phone app or browser is refused | Users are chosen in the settings, and the one logged in is not one of them. |
 | Recognised people are refused | The helper still says `pending` when the wait runs out. Raise "Wait for the voice match", or check that your automation writes the role. |
 | An unknown voice can still switch things | "Prefer handling commands locally" is still on for that voice assistant, or the command is a sentence-trigger automation. |
 | The refusal is always a fixed line | The refusal agent is missing, is the same as the main agent, returned an error, or took longer than 6 seconds. |
+
+## Development
+
+The logic that decides who is speaking lives in [`speaker.py`](custom_components/voice_persona_router/speaker.py) and has no Home Assistant imports, so its tests run with plain pytest:
+
+```
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-dev.txt   # .venv/bin/python on Linux and macOS
+.venv/Scripts/python -m pytest
+```
 
 ## Privacy
 
@@ -179,6 +201,7 @@ The router sends nothing anywhere by itself. It has no telemetry, no analytics a
 - **Settings.** Names, personas, instructions and fixed lines are saved in Home Assistant's own configuration storage (`.storage/core.config_entries`), the same place as every other integration's settings.
 - **Shared history.** Messages from Person 1 and Person 2 stay in Home Assistant's conversation history with their name in front, the same as with any other agent. Exchanges with unknown voices are removed from it.
 - **Logs.** With debug logging on, the router writes the text of each spoken request to the Home Assistant log. Turn debug logging off again when you are done, and check the log before you share it in a bug report.
+- **Home Assistant users.** If you choose a user for Person 1 or Person 2, the router stores that user's internal id in its settings and compares it with the user behind each request. Nothing about the user is sent anywhere.
 - **Voice data.** The router never sees audio or voiceprints. Speaker recognition happens on your satellite. The router only reads the role (`owner`, `partner`, `stranger`, `pending`) from your helper and, for near misses, the score sensor.
 
 Tell the people in your home, and your guests, that the assistant recognises voices and, if you use a cloud agent, that what they say may be sent to it.

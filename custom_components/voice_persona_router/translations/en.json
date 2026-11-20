@@ -19,7 +19,7 @@
     "step": {
       "init": {
         "title": "Voice persona settings",
-        "description": "Who is speaking comes from the voice_speaker helper of each satellite (owner, partner or stranger). Changes apply to the next request, no restart needed.",
+        "description": "Who is speaking comes from the voice_speaker helper of each satellite (owner, partner or stranger). Requests from the phone app or browser can be matched to the logged-in Home Assistant user instead. Changes apply to the next request, no restart needed.",
         "sections": {
           "agents": {
             "name": "Agents",
@@ -44,25 +44,29 @@
           },
           "owner": {
             "name": "Person 1",
-            "description": "Used when the voice_speaker helper says owner.",
+            "description": "Used when the voice_speaker helper says owner, or when this person's Home Assistant user sends a request from a device without a helper.",
             "data": {
               "name": "Name",
+              "user": "Home Assistant user",
               "persona": "Persona"
             },
             "data_description": {
               "name": "Put in front of this person's messages in the shared history, for example Alex.",
+              "user": "Requests from the phone app, the browser or any device without a voice_speaker helper, made while logged in as this user, count as this person. Once any user is chosen, other logged-in users count as an unknown voice.",
               "persona": "Instructions added to the main agent's prompt when this person speaks."
             }
           },
           "partner": {
             "name": "Person 2",
-            "description": "Used when the voice_speaker helper says partner.",
+            "description": "Used when the voice_speaker helper says partner, or when this person's Home Assistant user sends a request from a device without a helper.",
             "data": {
               "name": "Name",
+              "user": "Home Assistant user",
               "persona": "Persona"
             },
             "data_description": {
               "name": "Put in front of this person's messages in the shared history, for example Sam.",
+              "user": "Requests from the phone app, the browser or any device without a voice_speaker helper, made while logged in as this user, count as this person. Once any user is chosen, other logged-in users count as an unknown voice.",
               "persona": "Instructions added to the main agent's prompt when this person speaks."
             }
           },
@@ -105,11 +109,14 @@
             "data_description": {
               "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
               "wait_seconds": "How long to wait while the helper says pending. If no match arrives in time, the voice counts as unknown.",
-              "no_helper_role": "Used for the phone app and any device that has no voice_speaker helper."
+              "no_helper_role": "Used for a device that has no voice_speaker helper when no Home Assistant user decides it: nobody is logged in, or no user is chosen under Person 1 or Person 2."
             }
           }
         }
       }
+    },
+    "error": {
+      "same_user": "Person 1 and Person 2 cannot have the same Home Assistant user."
     }
   }
 }

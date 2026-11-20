@@ -43,12 +43,28 @@ def _number(low, high, step, unit=None):
     return selector.NumberSelector(selector.NumberSelectorConfig(**config))
 
 
-def _opt(key, current):
-    """Optional field that shows the saved value and may be cleared."""
+def _opt(key, current, allowed=None):
+    """Optional field that shows the saved value and may be cleared.
+
+    With `allowed`, a saved value that is no longer one of the choices (a deleted
+    user, say) is not suggested, so the form can still be saved.
+    """
     value = current.get(key)
-    if value is None or value == "":
+    if value is None or value == "" or (allowed is not None and value not in allowed):
         return vol.Optional(key)
     return vol.Optional(key, description={"suggested_value": value})
+
+
+async def login_users(hass):
+    """(id, name) of the active people who can log in, without Home Assistant's own accounts."""
+    users = await hass.auth.async_get_users()
+    return [(u.id, u.name or u.id) for u in users if u.is_active and not u.system_generated]
+
+
+def same_user_for_both(settings) -> bool:
+    owner_user = (settings.get("owner") or {}).get("user")
+    partner_user = (settings.get("partner") or {}).get("user")
+    return bool(owner_user) and owner_user == partner_user
 
 
 def _fixed(key, current, fallback):
@@ -114,7 +130,9 @@ def current_settings(hass, entry):
     }
 
 
-def settings_schema(current):
+def settings_schema(current, users):
+    """Build the settings form. `users` is the (id, name) list from login_users."""
+    user_ids = {user_id for user_id, _ in users}
     agents = current.get("agents") or {}
     local = current.get("local") or {}
     owner = current.get("owner") or {}
@@ -141,6 +159,7 @@ def settings_schema(current):
                 vol.Schema(
                     {
                         _opt("name", owner): _text(),
+                        _opt("user", owner, user_ids): _choice(users),
                         _opt("persona", owner): _text(True),
                     }
                 ),
@@ -150,6 +169,7 @@ def settings_schema(current):
                 vol.Schema(
                     {
                         _opt("name", partner): _text(),
+                        _opt("user", partner, user_ids): _choice(users),
                         _opt("persona", partner): _text(True),
                     }
                 ),
@@ -226,9 +246,14 @@ class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
 
 class PersonaRouterOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input=None):
+        errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            if not same_user_for_both(user_input):
+                return self.async_create_entry(title="", data=user_input)
+            errors["base"] = "same_user"
+        current = user_input or current_settings(self.hass, self.config_entry)
         return self.async_show_form(
             step_id="init",
-            data_schema=settings_schema(current_settings(self.hass, self.config_entry)),
+            data_schema=settings_schema(current, await login_users(self.hass)),
+            errors=errors,
         )

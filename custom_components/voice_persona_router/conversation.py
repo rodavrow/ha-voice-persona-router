@@ -40,6 +40,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.util import ulid
 
+from .speaker import Role, resolve_speaker
+
 _LOGGER = logging.getLogger(__name__)
 SCRIPT_TIMEOUT = 8
 REPLY_AGENT_TIMEOUT = 6
@@ -153,20 +155,16 @@ class PersonaRouter(conversation.ConversationEntity):
             return text
         return labelled
 
-    async def _who_is_speaking(self, device_id, advanced):
-        """Read the voice_speaker helper of the satellite.
+    async def _helper_state(self, device_id, advanced) -> str | None:
+        """Read the voice_speaker helper of the satellite, or None if it has none.
 
-        Returns the role and whether a voice match was seen for it. Waits a
-        little while the helper says pending, because the match lands a few
-        seconds after the wake word.
+        Waits a little while the helper says pending, because the match lands a
+        few seconds after the wake word.
         """
-        fallback = str(advanced.get("no_helper_role") or "owner")
-        if fallback not in ("owner", "wife", "stranger"):
-            fallback = "owner"
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
         if state is None:
-            return fallback, False
+            return None
         try:
             steps = int(float(advanced.get("wait_seconds", 3)) * 10)
         except (TypeError, ValueError):
@@ -177,14 +175,21 @@ class PersonaRouter(conversation.ConversationEntity):
             await asyncio.sleep(0.1)
             state = self.hass.states.get(helper)
             if state is None:
-                return fallback, False
-        # "partner" is accepted as another word for "wife".
-        role = "wife" if state.state == "partner" else state.state
-        if role in ("owner", "wife", "stranger"):
-            return role, True
-        if state.state == "pending":
-            return "stranger", False
-        return fallback, False
+                return None
+        return state.state
+
+    async def _who_is_speaking(self, user_input, settings) -> tuple[Role, bool]:
+        """Return the role and whether a voice match decided it."""
+        advanced = settings.get("advanced") or {}
+        helper_state = await self._helper_state(user_input.device_id, advanced)
+        user_id = user_input.context.user_id if user_input.context else None
+        user_map: list[tuple[Role, str | None]] = [
+            (role, (settings.get(SETTINGS_KEY[role]) or {}).get("user"))
+            for role in ("owner", "wife")
+        ]
+        return resolve_speaker(
+            helper_state, user_id, user_map, advanced.get("no_helper_role")
+        )
 
     def _last_score(self, device_id):
         """Voice match score of the satellite's last request, if it reports one."""
@@ -203,7 +208,7 @@ class PersonaRouter(conversation.ConversationEntity):
     async def _lookup_from_settings(self, user_input, settings):
         """Work out who is speaking and what to do with them, from the settings screen."""
         advanced = settings.get("advanced") or {}
-        who, matched = await self._who_is_speaking(user_input.device_id, advanced)
+        who, matched = await self._who_is_speaking(user_input, settings)
         rule = str(advanced.get("rule") or "").strip()
 
         if who != "stranger":
