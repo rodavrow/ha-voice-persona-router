@@ -88,12 +88,16 @@ class FakeAgents:
     memory_reply: str = '{"add": [], "remove": []}'
     # When set, the memory agent waits for it before answering.
     memory_gate: asyncio.Event | None = None
+    # When set, the memory agent raises it instead of answering.
+    memory_raises: Exception | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def converse(self, hass, text, conversation_id, context, **kwargs):
         call = {"text": text, "conversation_id": conversation_id, **kwargs}
         self.calls.append(call)
         if kwargs.get("agent_id") == MEMORY_AGENT:
+            if self.memory_raises is not None:
+                raise self.memory_raises
             if self.memory_gate is not None:
                 await self.memory_gate.wait()
             return _result(self.memory_reply)
