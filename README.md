@@ -26,6 +26,8 @@ Everything is set on a settings screen in the Home Assistant UI. There is no YAM
 - **A conversation agent** to answer the people who live here, set up the way you like it.
 - **A second conversation agent with no tools**, if you want refusals written by an AI. It must have no access to Assist or any other tool provider. Fixed lines need no second agent.
 
+> **Tip:** Have an old Amazon Echo Dot or Echo Show lying around? Check out the excellent [EchoLocal](https://github.com/ygelfand/echolocal) project. It turns supported Echo devices into local Home Assistant voice satellites with voice match (who's speaking). This router was built and tested on EchoLocal satellites, and the [example automation](examples/speaker_tracking_automation.yaml) is written for the "last speaker" and "last speaker score" sensors that EchoLocal's voice match provides.
+
 ## Install
 
 ### With HACS

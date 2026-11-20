@@ -9,8 +9,9 @@
 #   partner   Person 2 in the router settings
 #   stranger  anybody else
 #
-# It assumes each satellite device has two sensors from its speaker
-# recognition: one whose entity id ends in _last_speaker (the recognised
+# It was written for EchoLocal satellites (https://github.com/ygelfand/echolocal)
+# and their voice match. It assumes each satellite device has two sensors
+# from its speaker recognition: one whose entity id ends in _last_speaker (the recognised
 # name) and one that ends in _last_speaker_score. Change the entity ids and
 # the two names (Alex and Sam here) to match your own setup. If your speaker
 # recognition reports its result some other way, only the triggers and the
