@@ -66,3 +66,22 @@ async def test_unmapped_user_gets_no_memory_and_saves_nothing(hass: HomeAssistan
     assert result.response.speech["plain"]["speech"] == "The answer is no."
     assert agents.calls == []
     assert agents.calls_to(MEMORY_AGENT) == []
+
+
+async def test_regression_review_5_unexpected_helper_value_gets_no_memory(hass: HomeAssistant):
+    entry = await add_mapped_router(hass)
+    hass.states.async_set("input_text.voice_speaker_kitchendevice", "guest")
+    agents = FakeAgents(memory_reply=reply(add=[told("Likes coffee.")]))
+
+    with agents.patched():
+        result = await ask(
+            hass,
+            entry,
+            "Remember that I like coffee",
+            device_id="kitchendevice",
+            user_id=ALEX_USER,
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert result.response.speech["plain"]["speech"] == "The answer is no."
+    assert agents.calls == []
