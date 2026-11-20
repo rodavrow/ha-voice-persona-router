@@ -86,7 +86,7 @@ async def remember(hass: HomeAssistant, key: str, text: str, source: str = "told
 
 
 async def test_person_1_gets_their_assistant_and_global_facts(hass: HomeAssistant):
-    entry = await add_router(hass)
+    entry = await add_router(hass, options_with(memory={"shared": False}))
     await remember(hass, entry_key(entry.entry_id, "owner"), "Likes jazz.")
     await remember(hass, global_key("owner"), "Has a cat.")
     await remember(hass, entry_key(entry.entry_id, "wife"), "Likes tea.")
@@ -102,7 +102,9 @@ async def test_person_1_gets_their_assistant_and_global_facts(hass: HomeAssistan
 
 
 async def test_person_2_gets_only_their_own_facts(hass: HomeAssistant):
-    entry = await add_router(hass, options_with(advanced={"no_helper_role": "wife"}))
+    entry = await add_router(
+        hass, options_with(advanced={"no_helper_role": "wife"}, memory={"shared": False})
+    )
     await remember(hass, entry_key(entry.entry_id, "owner"), "Likes jazz.")
     await remember(hass, entry_key(entry.entry_id, "wife"), "Likes tea.")
     await remember(hass, global_key("wife"), "Runs on Sundays.")

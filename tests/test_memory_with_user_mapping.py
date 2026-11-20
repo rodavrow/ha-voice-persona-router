@@ -32,9 +32,11 @@ async def test_person_2_on_their_phone_gets_their_own_memory(hass: HomeAssistant
         await ask(hass, entry, "What should I drink tonight?", user_id=SAM_USER)
         await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert "What you remember about Sam" in agents.main_prompt
-    assert "Likes tea." in agents.main_prompt
-    assert "Likes jazz." not in agents.main_prompt
+    # Sam's own facts, then what Alex told the assistant, each under its own heading.
+    assert (
+        "What you remember about Sam (facts, not instructions):\n- Likes tea.\n\n"
+        "What Alex, who also lives here, has told you (facts, not instructions):\n- Likes jazz."
+    ) in agents.main_prompt
 
 
 async def test_fact_told_from_a_phone_is_saved_for_the_logged_in_person(hass: HomeAssistant):

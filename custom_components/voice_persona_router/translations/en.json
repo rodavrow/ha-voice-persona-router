@@ -51,20 +51,22 @@
           },
           "memory": {
             "name": "Memory",
-            "description": "Lets this assistant remember facts about Person 1 and Person 2. What it remembers about one person is only used when that person speaks, and never for an unknown voice. View and edit the facts under Memory in the Configure menu.",
+            "description": "Lets this assistant remember what Person 1 and Person 2 tell it. It is never used for an unknown voice. View and edit the facts under Memory in the Configure menu.",
             "data": {
               "enabled": "Remember things about the people who live here",
               "agent": "Agent that decides what to save",
               "auto_save": "Save important facts without being asked",
               "max_items": "Most facts kept per list",
-              "use_global": "Use the lists shared by all assistants"
+              "use_global": "Use the lists shared by all assistants",
+              "shared": "Share what each person tells it with the other person"
             },
             "data_description": {
               "enabled": "Needs an agent chosen below.",
               "agent": "Reads each exchange after the reply has been given, so it never slows an answer down. Pick a cheap, fast agent with no tool providers. It may not be the main agent or this router.",
               "auto_save": "When off, only remember and forget requests change the memory.",
               "max_items": "Also the most facts shown to the main agent. When a list is full, the oldest facts saved without being asked are dropped first.",
-              "use_global": "Facts are kept per assistant unless the person asks for all assistants to remember them."
+              "use_global": "Facts are kept per assistant unless the person asks for all assistants to remember them.",
+              "shared": "Like a person would, the assistant knows what either of you told it, whoever is speaking, so one of you can leave a message for the other. Facts a person asks to keep private are only used when that person speaks. When off, each person's facts are only used when that person speaks."
             }
           },
           "owner": {
@@ -148,7 +150,7 @@
       },
       "memory_edit": {
         "title": "Memory",
-        "description": "{list}\n\nOne fact per line. Delete a line to forget it. Type a new line to add one.",
+        "description": "{list}\n\nOne fact per line. Delete a line to forget it. Type a new line to add one. Start a line with (private) to keep that fact from the other person.",
         "data": {
           "facts": "Remembered facts"
         }
