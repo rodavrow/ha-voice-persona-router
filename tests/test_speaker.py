@@ -32,9 +32,16 @@ def test_helper_still_pending_after_wait_is_stranger_without_voice_match():
     assert resolve_speaker("pending", PERSON_1_USER, BOTH_MAPPED, "owner") == ("stranger", False)
 
 
-@pytest.mark.parametrize("helper_state", ["", "unknown", "unavailable", "Owner"])
-def test_unrecognised_helper_value_uses_no_helper_role(helper_state):
-    assert resolve_speaker(helper_state, PERSON_2_USER, BOTH_MAPPED, "wife") == ("wife", False)
+@pytest.mark.parametrize(
+    "helper_state", ["", "unknown", "unavailable", "Owner", "Stranger", "guest", " owner"]
+)
+def test_regression_review_5_unexpected_helper_value_is_refused_as_a_stranger(helper_state):
+    # A helper that exists but holds something else must fail closed, not fall back
+    # to the no-helper role, whoever is logged in.
+    assert resolve_speaker(helper_state, PERSON_1_USER, BOTH_MAPPED, "owner") == (
+        "stranger",
+        False,
+    )
 
 
 # No helper: the logged-in user decides once any user is mapped.

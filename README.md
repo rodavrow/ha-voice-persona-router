@@ -68,6 +68,7 @@ The helper holds one of these values:
 | `partner` | Person 2 in the router settings |
 | `stranger` | Anybody else |
 | `pending` | The wake word was heard and the voice match has not arrived yet |
+| anything else, or empty | Treated as an unknown voice, so a helper that is not kept up to date refuses instead of answering |
 
 ### 2. Keep the helper up to date
 
@@ -180,6 +181,7 @@ Turn on debug logging for the integration (the entry's menu > **Enable debug log
 | Everyone is treated as Person 1 | No helper exists with the device id of that satellite, so the "device without speaker recognition" setting applies. On the phone app or browser, choose each person's Home Assistant user in the settings. |
 | The phone app or browser is refused | Users are chosen in the settings, and the one logged in is not one of them. |
 | Recognised people are refused | The helper still says `pending` when the wait runs out. Raise "Wait for the voice match", or check that your automation writes the role. |
+| A satellite refuses everyone | Its helper is empty or holds a value other than `owner`, `partner`, `stranger` or `pending`. Check that the automation includes this satellite and writes exactly those words. |
 | An unknown voice can still switch things | "Prefer handling commands locally" is still on for that voice assistant, or the command is a sentence-trigger automation. |
 | The refusal is always a fixed line | The refusal agent is missing, is the same as the main agent, returned an error, or took longer than 6 seconds. |
 

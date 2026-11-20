@@ -30,7 +30,8 @@ def resolve_speaker(
     user_map        (role, user id) pairs from the settings; empty ids are ignored
     no_helper_role  role for a request with no helper and no mapped user
 
-    A helper always wins, so voice decides on satellites. Without a helper, a logged-in
+    A helper always wins, so voice decides on satellites. A helper that holds anything
+    but a role counts as a stranger. Without a helper, a logged-in
     user mapped to a person is that person. Once any user is mapped, a logged-in user
     who is not mapped counts as a stranger.
     """
@@ -41,9 +42,9 @@ def resolve_speaker(
             return "wife", True
         if helper_state in ROLES:
             return _as_role(helper_state, fallback), True
-        if helper_state == "pending":  # The voice match never arrived.
-            return "stranger", False
-        return fallback, False
+        # Still pending (the voice match never arrived) or a value that is not a role:
+        # refuse, so a misconfigured satellite fails closed.
+        return "stranger", False
 
     mapped: list[tuple[Role, str]] = [(role, mapped_id) for role, mapped_id in user_map if mapped_id]
     if user_id and mapped:
