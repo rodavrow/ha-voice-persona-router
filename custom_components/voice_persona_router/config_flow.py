@@ -7,7 +7,6 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import DOMAIN
@@ -19,6 +18,7 @@ from .memory import (
     async_get_memory,
     entry_key,
     global_key,
+    router_agent_ids,
 )
 
 MEMORY_DEFAULTS = {"enabled": False, "auto_save": True, "max_items": 50, "use_global": True}
@@ -296,12 +296,11 @@ class PersonaRouterOptionsFlow(OptionsFlow):
         return self.async_show_menu(step_id="init", menu_options=["settings", "memory"])
 
     def _other_agents(self, settings) -> set[str]:
-        """Agents the memory agent may not be: the main agent and this router."""
-        registry = er.async_get(self.hass)
+        """Agents the memory agent may not be: the main agent and any router."""
         return {
             (settings.get("agents") or {}).get("agent"),
             self.config_entry.data.get("agent"),
-            registry.async_get_entity_id("conversation", DOMAIN, self.config_entry.entry_id),
+            *router_agent_ids(self.hass),
         } - {None}
 
     async def async_step_settings(self, user_input=None):

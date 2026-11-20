@@ -179,14 +179,15 @@ Add a second conversation agent for this and choose it under **Settings > Memory
 
 - **A cheap, fast model.** It is called once after each conversational turn and only has to return a few lines of JSON.
 - **No tools.** Give it no access to Assist or any other tool provider. It only needs to read an exchange and answer.
-- **Not the main agent, and not the router.** The settings screen refuses both.
+- **Not the main agent, and not a router.** The settings screen refuses the main agent and any Voice Persona Router.
 - Its own instructions can stay empty. The router sends it the instructions it needs with each call.
 
 ### What is never saved
 
 - Anything from an unknown voice or a near miss.
 - Device commands handled by Home Assistant's built-in commands, and replies that ended in an error.
-- Secrets: anything that mentions a password, PIN or code, a card or account number, or any run of four or more digits that is not a date, a time or a year. This filter errs on the side of not saving.
+- Secrets: anything that mentions a password, PIN, code or similar word, a card or account number, or any run of four or more digits (also spelled out, or split by spaces or punctuation) that is not a date, a time or a year. Next to words such as alarm, door, gate or safe, any such number is dropped. This filter errs on the side of not saving, so now and then a harmless fact is not kept. It is a safety net, not a guarantee: do not tell the assistant secrets.
+- Anything the assistant itself said. Only the person's own words can become a fact, and only a request to remember can put a fact on the shared lists.
 - Facts longer than 200 characters, and facts that are already on the list.
 
 The memory agent is also told to leave out small talk, one-off questions and sensitive things about other people (health, money, relationships), but that part is up to its judgement.
