@@ -15,6 +15,8 @@ It sits in front of a conversation agent you already have (any LLM agent). For e
 
 It can also run Home Assistant's built-in quick commands ("turn off the kitchen lights") only for recognised speakers.
 
+Optionally, each assistant **remembers things about the people who live here**: what they ask it to remember, and lasting facts that come up in conversation. What it remembers about a person is only used when that person is speaking. See [Memory](#memory).
+
 Everything is set on a settings screen in the Home Assistant UI. There is no YAML to edit for the router itself.
 
 > **This is not a security control.** Voice matching can be fooled, and some routes into Home Assistant bypass the router (see [Limits](#limits)). Treat it as a way to give each person their own assistant personality and to keep guests from switching your lights off for fun, not as a lock.
@@ -25,6 +27,7 @@ Everything is set on a settings screen in the Home Assistant UI. There is no YAM
 - **A voice satellite that can tell who is speaking.** The router does not do speaker recognition itself. It reads a helper that you keep up to date with an automation (an example is included).
 - **A conversation agent** to answer the people who live here, set up the way you like it.
 - **A second conversation agent with no tools**, if you want refusals written by an AI. It must have no access to Assist or any other tool provider. Fixed lines need no second agent.
+- **A cheap conversation agent with no tools**, if you want [memory](#memory). It decides what is worth remembering after each reply.
 
 > **Tip:** Have an old Amazon Echo Dot or Echo Show lying around? Check out the excellent [EchoLocal](https://github.com/ygelfand/echolocal) project. It turns supported Echo devices into local Home Assistant voice satellites with voice match (who's speaking). This router was built and tested on EchoLocal satellites, and the [example automation](examples/speaker_tracking_automation.yaml) is written for the "last speaker" and "last speaker score" sensors that EchoLocal's voice match provides.
 
@@ -84,7 +87,7 @@ This creates a new conversation agent with that name. Add the integration once f
 
 ### 4. Fill in the settings
 
-Open the new entry and choose **Configure**. See [Settings](#settings) below.
+Open the new entry and choose **Configure**, then **Settings**. See [Settings](#settings) below.
 
 ### 5. Point your voice assistant at the router
 
@@ -103,6 +106,11 @@ Changes apply to the next request. No restart is needed.
 | **Agents** | Main agent | Answers Person 1 and Person 2, with its normal tools. |
 | **Built-in commands** | Try built-in commands first | A request that exactly matches one of Home Assistant's own commands is carried out at once, without the main agent. Recognised speakers only. |
 | | Leave questions and music searches to the main agent | State questions ("is the door closed") and play-music requests go to the main agent even when a built-in command matches. |
+| **Memory** | Remember things about the people who live here | Turns memory on for this assistant. Needs the agent below. |
+| | Agent that decides what to save | Reads each exchange after the reply has been given. Must not be the main agent or the router. Give it no tool providers. |
+| | Save important facts without being asked | When off, only "remember" and "forget" requests change the memory. |
+| | Most facts kept per list | 10 to 200, default 50. Also the most facts shown to the main agent. |
+| | Use the lists shared by all assistants | Read the shared lists, and save to them when the person asks for all assistants to remember something. |
 | **Person 1**, **Person 2** | Name | Put in front of that person's messages in the shared history. |
 | | Persona | Instructions added to the main agent's prompt when that person speaks. |
 | **Unknown voices** | How to answer | A refusal written by an agent without tools, or fixed lines only. |
@@ -139,6 +147,50 @@ We have not been introduced, so the answer is no.
 
 > The conversation history is shared by the household. Every user message starts with the name of the person who said it, followed by a colon. Answer only the person named at the start of the latest message. Never start your own reply with a name and a colon, and never read these labels aloud.
 
+## Memory
+
+With memory on, an assistant remembers facts about Person 1 and Person 2 and is told them again each time that person speaks.
+
+### What is remembered, and for whom
+
+- **Per person.** Every fact belongs to the person who was speaking when it was saved. When Person 1 speaks, the assistant is told Person 1's facts and none of Person 2's.
+- **Per assistant by default.** A fact told to one router is only known to that router. If you have a kitchen assistant and an office assistant, each keeps its own lists.
+- **For all assistants on request.** If the person says so ("remember for all the assistants that I am vegetarian", "everyone should know…"), the fact goes on a list shared by every router.
+- **Told or judged.** "Remember that…" always saves. With "Save important facts without being asked" on, lasting facts that come up in conversation are saved as well: preferences, people, plans with dates, routines. "Forget…" removes matching facts.
+- **Never for unknown voices.** An unknown voice or a near miss is never told anything from memory, and nothing they say is saved.
+
+Saving never slows an answer down. The reply is given first, and the memory agent looks at the exchange afterwards. Because of that, the assistant confirms a "remember" request before the fact is actually stored a moment later.
+
+### View and edit what is remembered
+
+Open the router's **Configure**, choose **Memory**, and pick a list, for example "Alex: this assistant (12)" or "Alex: all assistants (3)". The list is shown one fact per line:
+
+- delete a line to forget it
+- change a line to correct it
+- type a new line to add a fact
+
+Saving returns to the menu, so you can go on to another list. The lists shared by all assistants can be edited from any router. This works even when memory is switched off.
+
+Memory is kept in `.storage/voice_persona_router.memory` in your Home Assistant configuration. It creates no entities, so nothing shows up on dashboards or in the To-do panel. Removing a router deletes that router's own lists and leaves the shared lists alone.
+
+### Choosing a memory agent
+
+Add a second conversation agent for this and choose it under **Settings > Memory**:
+
+- **A cheap, fast model.** It is called once after each conversational turn and only has to return a few lines of JSON.
+- **No tools.** Give it no access to Assist or any other tool provider. It only needs to read an exchange and answer.
+- **Not the main agent, and not the router.** The settings screen refuses both.
+- Its own instructions can stay empty. The router sends it the instructions it needs with each call.
+
+### What is never saved
+
+- Anything from an unknown voice or a near miss.
+- Device commands handled by Home Assistant's built-in commands, and replies that ended in an error.
+- Secrets: anything that mentions a password, PIN or code, a card or account number, or any run of four or more digits that is not a date, a time or a year. This filter errs on the side of not saving.
+- Facts longer than 200 characters, and facts that are already on the list.
+
+The memory agent is also told to leave out small talk, one-off questions and sensitive things about other people (health, money, relationships), but that part is up to its judgement.
+
 ## How unknown voices are kept away from your devices
 
 - The main agent is never called for an unknown voice, so none of its tools can run.
@@ -158,6 +210,9 @@ The near-miss reply needs a sensor on the satellite's device whose entity id end
 - **If the lookup itself fails**, the router answers as the main agent without a persona.
 - **Built-in commands wait for the voice match** and are answered with a spoken reply, where Home Assistant on its own may only play a short acknowledge sound.
 - **Only assistants that use the router are covered.** Any other voice assistant you have set up is unaffected.
+- **Memory costs a second model call.** With memory on, the memory agent is called after each conversational turn (not for built-in commands or very short requests). That adds cost, not waiting time. With "Save important facts without being asked" off it is only called for remember and forget requests.
+- **Remembered facts are only as good as the memory agent's judgement.** It can save something trivial, miss something important or word a fact wrongly. Check the lists now and then under Configure > Memory.
+- **Remember and forget requests are recognised in English.** With auto-save off, a request in another language is not picked up.
 - English is the only translation of the settings screen.
 
 ## Troubleshooting
@@ -170,6 +225,7 @@ Turn on debug logging for the integration (the entry's menu > **Enable debug log
 | Recognised people are refused | The helper still says `pending` when the wait runs out. Raise "Wait for the voice match", or check that your automation writes the role. |
 | An unknown voice can still switch things | "Prefer handling commands locally" is still on for that voice assistant, or the command is a sentence-trigger automation. |
 | The refusal is always a fixed line | The refusal agent is missing, is the same as the main agent, returned an error, or took longer than 6 seconds. |
+| Nothing is remembered | Memory is off, no memory agent is chosen, or the memory agent does not answer with JSON. Turn on debug logging to see one line per memory pass. |
 
 ## Privacy
 
@@ -179,6 +235,7 @@ The router sends nothing anywhere by itself. It has no telemetry, no analytics a
 - **Settings.** Names, personas, instructions and fixed lines are saved in Home Assistant's own configuration storage (`.storage/core.config_entries`), the same place as every other integration's settings.
 - **Shared history.** Messages from Person 1 and Person 2 stay in Home Assistant's conversation history with their name in front, the same as with any other agent. Exchanges with unknown voices are removed from it.
 - **Logs.** With debug logging on, the router writes the text of each spoken request to the Home Assistant log. Turn debug logging off again when you are done, and check the log before you share it in a bug report.
+- **Memory.** With memory on, each exchange with a recognised person (their words and the assistant's reply), together with what is already remembered about them, is sent to the memory agent you chose. If that is a cloud LLM, it leaves your network under that provider's terms. The remembered facts are stored unencrypted in `.storage/voice_persona_router.memory` and are included in Home Assistant backups. With debug logging on, saved and removed facts are written to the log.
 - **Voice data.** The router never sees audio or voiceprints. Speaker recognition happens on your satellite. The router only reads the role (`owner`, `partner`, `stranger`, `pending`) from your helper and, for near misses, the score sensor.
 
 Tell the people in your home, and your guests, that the assistant recognises voices and, if you use a cloud agent, that what they say may be sent to it.
