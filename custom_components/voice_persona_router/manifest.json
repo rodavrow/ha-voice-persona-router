@@ -12,5 +12,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/rodavrow/ha-voice-persona-router/issues",
-  "version": "0.4.0.dev1"
+  "version": "0.4.0.dev2"
 }

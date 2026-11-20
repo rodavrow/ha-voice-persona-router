@@ -15,6 +15,7 @@ from .memory import (
     LineTooLongError,
     MemoryItem,
     MemoryStore,
+    Person,
     async_get_memory,
     entry_key,
     global_key,
@@ -266,10 +267,11 @@ def memory_settings_error(settings, other_agents) -> str | None:
 def memory_list_choices(memory: MemoryStore, entry_id: str, settings) -> list[tuple[str, str]]:
     """(list key, label) of the lists one router entry can see, with their item counts."""
     choices = []
-    for person, settings_key, fallback in (
+    people: tuple[tuple[Person, str, str], ...] = (
         ("owner", "owner", "Person 1"),
         ("wife", "partner", "Person 2"),
-    ):
+    )
+    for person, settings_key, fallback in people:
         name = str((settings.get(settings_key) or {}).get("name") or "").strip() or fallback
         for key, scope in (
             (entry_key(entry_id, person), "this assistant"),

@@ -40,6 +40,18 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.util import ulid
 
+from .memory import (
+    REMEMBER_RULE,
+    Exchange,
+    MemorySettings,
+    active_memory_settings,
+    async_run_extraction,
+    entry_key,
+    get_loaded_memory,
+    global_key,
+    memory_block,
+    should_extract,
+)
 from .speaker import Role, resolve_speaker
 
 _LOGGER = logging.getLogger(__name__)
@@ -191,6 +203,58 @@ class PersonaRouter(conversation.ConversationEntity):
             helper_state, user_id, user_map, advanced.get("no_helper_role")
         )
 
+    def _memory_settings(self) -> MemorySettings | None:
+        """Memory settings of this router, or None when memory is not active."""
+        return active_memory_settings(
+            self._entry.options, (self._main_agent(), self.entity_id)
+        )
+
+    def _memory_block(self, who, name, settings: MemorySettings) -> str:
+        """What this assistant remembers about one person. Reads memory only, no I/O."""
+        memory = get_loaded_memory(self.hass)
+        if memory is None:
+            return ""
+        shared = memory.items(global_key(who)) if settings.use_global else []
+        return memory_block(
+            name,
+            memory.items(entry_key(self._entry.entry_id, who)),
+            shared,
+            max_items=settings.max_items,
+        )
+
+    def _start_memory_pass(self, user_input, resp, result) -> None:
+        """Let the memory agent look at a finished turn, in the background.
+
+        Only for a recognised person whose turn the main agent answered. The reply
+        never waits for this.
+        """
+        try:
+            if not resp or resp.get("who") not in ("owner", "wife"):
+                return
+            settings = self._memory_settings()
+            memory = get_loaded_memory(self.hass)
+            if settings is None or memory is None:
+                return
+            if result.response.response_type == intent.IntentResponseType.ERROR:
+                return
+            if not should_extract(user_input.text, auto_save=settings.auto_save):
+                return
+            exchange = Exchange(
+                entry_id=self._entry.entry_id,
+                person=resp["who"],
+                name=str(resp.get("label") or ""),
+                user_text=user_input.text,
+                reply_text=str((result.response.speech.get("plain") or {}).get("speech") or ""),
+                language=user_input.language,
+                context=user_input.context,
+            )
+            self.hass.async_create_background_task(
+                async_run_extraction(self.hass, memory, settings, exchange),
+                name=f"{self.entity_id} memory pass",
+            )
+        except Exception:  # noqa: BLE001 - memory must never block the reply
+            _LOGGER.exception("Could not start the memory pass")
+
     def _last_score(self, device_id):
         """Voice match score of the satellite's last request, if it reports one."""
         if not device_id:
@@ -213,11 +277,18 @@ class PersonaRouter(conversation.ConversationEntity):
 
         if who != "stranger":
             person = settings.get(SETTINGS_KEY[who]) or {}
+            name = str(person.get("name") or "").strip()
+            memory = ""
+            memory_settings = self._memory_settings()
+            if memory_settings is not None:
+                memory = self._memory_block(who, name, memory_settings)
+                rule = "\n".join(part for part in (rule, REMEMBER_RULE) if part)
             return {
                 "who": who,
                 "persona_for_this_message": str(person.get("persona") or "").strip(),
+                "memory": memory,
                 "rule": rule,
-                "label": str(person.get("name") or "").strip(),
+                "label": name,
                 "fixed_replies": [],
                 "reply_agent": "",
             }
@@ -320,7 +391,12 @@ class PersonaRouter(conversation.ConversationEntity):
             else:
                 resp = await self._lookup_from_script(user_input)
             if resp:
-                parts = [resp.get("persona_for_this_message"), resp.get("rule"), extra]
+                parts = [
+                    resp.get("persona_for_this_message"),
+                    resp.get("memory"),
+                    resp.get("rule"),
+                    extra,
+                ]
                 extra = "\n\n".join(p for p in parts if p) or None
         except Exception:  # noqa: BLE001 - a failed lookup must never block the reply
             resp = None
@@ -362,7 +438,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 if handled is not None:
                     return handled
 
-        return await conversation.async_converse(
+        result = await conversation.async_converse(
             self.hass,
             text=text,
             conversation_id=user_input.conversation_id,
@@ -373,3 +449,5 @@ class PersonaRouter(conversation.ConversationEntity):
             satellite_id=user_input.satellite_id,
             extra_system_prompt=extra,
         )
+        self._start_memory_pass(user_input, resp, result)
+        return result
