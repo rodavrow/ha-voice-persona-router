@@ -185,12 +185,19 @@ Turn on debug logging for the integration (the entry's menu > **Enable debug log
 
 ## Development
 
-The logic that decides who is speaking lives in [`speaker.py`](custom_components/voice_persona_router/speaker.py) and has no Home Assistant imports, so its tests run with plain pytest:
+The tests use Home Assistant's own test package, pinned to the Home Assistant version the integration targets. Home Assistant only runs on Linux and macOS, so on Windows run them in Docker:
+
+```
+docker build -f Dockerfile.test -t voice-persona-router-test .
+docker run --rm -v "$PWD:/src" voice-persona-router-test
+```
+
+On Linux or macOS with Python 3.14 you can run them directly:
 
 ```
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements-dev.txt   # .venv/bin/python on Linux and macOS
-.venv/Scripts/python -m pytest
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m pytest
 ```
 
 ## Privacy

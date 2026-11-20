@@ -9,7 +9,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
-DOMAIN = "voice_persona_router"
+from .const import DOMAIN
 
 DEFAULT_NEAR_PERSONA = (
     "The voice sounded a little like someone who lives here, but you could not be sure. "

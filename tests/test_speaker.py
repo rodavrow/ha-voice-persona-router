@@ -4,7 +4,7 @@
 
 import pytest
 
-from speaker import resolve_speaker
+from custom_components.voice_persona_router.speaker import resolve_speaker
 
 PERSON_1_USER = "user-person-1"
 PERSON_2_USER = "user-person-2"
