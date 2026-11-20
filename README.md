@@ -3,6 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/R5O720EQBI)
 
+By [rodavrow](https://github.com/rodavrow).
+
 A Home Assistant custom integration that makes a voice assistant behave differently depending on who is speaking.
 
 It sits in front of a conversation agent you already have (any LLM agent). For each request it looks up who is speaking, then:

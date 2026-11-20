@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: MIT
 # Example: keep one "who is speaking" helper per voice satellite up to date.
 #
 # The router reads input_text.voice_speaker_<device id of the satellite>.

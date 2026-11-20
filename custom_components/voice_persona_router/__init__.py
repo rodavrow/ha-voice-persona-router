@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: MIT
 """Voice Persona Router: picks a persona per speaker, then hands over to a real agent."""
 
 from homeassistant.config_entries import ConfigEntry

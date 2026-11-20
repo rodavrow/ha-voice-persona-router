@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: MIT
 """Config flow and settings screen for Voice Persona Router."""
 
 import voluptuous as vol

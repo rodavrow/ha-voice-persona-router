@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: MIT
 """Conversation entity that adds a per-speaker persona and delegates to another agent.
 
 Settings come from the settings screen of the entry (its options). An entry
