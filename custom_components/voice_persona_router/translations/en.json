@@ -1,0 +1,115 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a voice persona router",
+        "description": "The router sits in front of a conversation agent and changes its persona depending on who is speaking. After adding it, open its settings to fill in the personas.",
+        "data": {
+          "name": "Name",
+          "agent": "Main agent"
+        },
+        "data_description": {
+          "name": "Shown as the name of the new conversation agent, for example Kitchen assistant (by speaker).",
+          "agent": "The agent that answers the people who live here."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Voice persona settings",
+        "description": "Who is speaking comes from the voice_speaker helper of each satellite (owner, partner or stranger). Changes apply to the next request, no restart needed.",
+        "sections": {
+          "agents": {
+            "name": "Agents",
+            "data": {
+              "agent": "Main agent"
+            },
+            "data_description": {
+              "agent": "Answers Person 1 and Person 2, with its normal tools."
+            }
+          },
+          "local": {
+            "name": "Built-in commands",
+            "description": "Home Assistant's own quick commands, such as turn off the kitchen lights. They are only tried for Person 1 and Person 2, never for an unknown voice. For this to be the only way in, switch off Prefer handling commands locally on the voice assistants that use this router.",
+            "data": {
+              "enabled": "Try built-in commands first",
+              "leave_questions": "Leave questions and music searches to the main agent"
+            },
+            "data_description": {
+              "enabled": "A request that matches a built-in command exactly is carried out at once, without the main agent. Anything else goes to the main agent.",
+              "leave_questions": "State questions such as is the door closed, and play music requests, go to the main agent even when a built-in command matches."
+            }
+          },
+          "owner": {
+            "name": "Person 1",
+            "description": "Used when the voice_speaker helper says owner.",
+            "data": {
+              "name": "Name",
+              "persona": "Persona"
+            },
+            "data_description": {
+              "name": "Put in front of this person's messages in the shared history, for example Alex.",
+              "persona": "Instructions added to the main agent's prompt when this person speaks."
+            }
+          },
+          "partner": {
+            "name": "Person 2",
+            "description": "Used when the voice_speaker helper says partner.",
+            "data": {
+              "name": "Name",
+              "persona": "Persona"
+            },
+            "data_description": {
+              "name": "Put in front of this person's messages in the shared history, for example Sam.",
+              "persona": "Instructions added to the main agent's prompt when this person speaks."
+            }
+          },
+          "strangers": {
+            "name": "Unknown voices",
+            "description": "An unknown voice never reaches the main agent or any tool, and the exchange is kept out of the shared history.",
+            "data": {
+              "mode": "How to answer",
+              "reply_agent": "Agent that writes the refusal",
+              "persona": "Instructions for the refusal",
+              "fixed_replies": "Fixed lines"
+            },
+            "data_description": {
+              "reply_agent": "Must be an agent with no tool providers. It may not be the main agent.",
+              "persona": "What the refusal agent is told about the person speaking.",
+              "fixed_replies": "One line per row. One is picked at random when fixed lines are chosen, or when the refusal agent fails or is slow."
+            }
+          },
+          "near_miss": {
+            "name": "Almost recognised",
+            "description": "For an unknown voice whose match score came close. The answer is still a refusal without tools, but it asks them to try again.",
+            "data": {
+              "enabled": "Ask to try again on a near miss",
+              "min_score": "Lowest score that counts as a near miss",
+              "persona": "Instructions for the try again reply",
+              "fixed_replies": "Fixed try again lines"
+            },
+            "data_description": {
+              "min_score": "Compared with the Last speaker score sensor of the satellite. Scores from this value up to the satellite's own recognition level get the try again reply.",
+              "fixed_replies": "One line per row. Used when fixed lines are chosen above, or when the refusal agent fails or is slow."
+            }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "rule": "Shared history rule",
+              "wait_seconds": "Wait for the voice match",
+              "no_helper_role": "A device without speaker recognition is"
+            },
+            "data_description": {
+              "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
+              "wait_seconds": "How long to wait while the helper says pending. If no match arrives in time, the voice counts as unknown.",
+              "no_helper_role": "Used for the phone app and any device that has no voice_speaker helper."
+            }
+          }
+        }
+      }
+    }
+  }
+}
