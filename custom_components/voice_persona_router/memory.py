@@ -20,6 +20,7 @@ from typing import Any, Literal, TypedDict
 
 from homeassistant.components import conversation
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -83,6 +84,49 @@ def _apply_cap(items: list[MemoryItem], max_items: int) -> None:
         items.remove(item)
 
 
+def _valid_lists(data: object) -> dict[str, list[MemoryItem]]:
+    """The lists of a loaded file, without anything that does not have the right shape.
+
+    The file can be edited by hand, and one bad entry must not stop the routers.
+    """
+    if data is None:
+        return {}
+    stored = data.get("lists") if isinstance(data, dict) else None
+    if not isinstance(stored, dict):
+        _LOGGER.warning("The memory file does not have the expected shape, starting empty")
+        return {}
+    lists: dict[str, list[MemoryItem]] = {}
+    for key, raw_items in stored.items():
+        if not isinstance(key, str) or not isinstance(raw_items, list):
+            _LOGGER.warning("Skipping a memory list that is not a list")
+            continue
+        items: list[MemoryItem] = []
+        taken: set[str] = set()
+        for raw in raw_items:
+            if not isinstance(raw, dict) or not isinstance(raw.get("text"), str):
+                _LOGGER.warning("Skipping a remembered fact that is not valid")
+                continue
+            text = clean_text(raw["text"])
+            if not text or len(text) > MAX_TEXT_LENGTH:
+                _LOGGER.warning("Skipping a remembered fact that is not valid")
+                continue
+            item_id = raw.get("id")
+            if not isinstance(item_id, str) or not item_id or item_id in taken:
+                item_id = secrets.token_hex(4)
+            taken.add(item_id)
+            saved = raw.get("saved")
+            items.append(
+                MemoryItem(
+                    id=item_id,
+                    text=text,
+                    source="told" if raw.get("source") == "told" else "judged",
+                    saved=saved if isinstance(saved, str) and saved else _today(),
+                )
+            )
+        lists[key] = items
+    return lists
+
+
 class MemoryStore:
     """In-memory copy of every list, saved to .storage with a short delay."""
 
@@ -94,8 +138,7 @@ class MemoryStore:
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def async_load(self) -> None:
-        data = await self.store.async_load()
-        self._lists = dict((data or {}).get("lists") or {})
+        self._lists = _valid_lists(await self.store.async_load())
 
     def _schedule_save(self) -> None:
         self.store.async_delay_save(lambda: {"lists": self._lists}, SAVE_DELAY)
@@ -133,6 +176,8 @@ class MemoryStore:
             items.append(item)
             if max_items is not None:
                 _apply_cap(items, max_items)
+            if not any(kept is item for kept in items):
+                return None
             self._schedule_save()
             return MemoryItem(**item)
 
@@ -250,6 +295,20 @@ def active_memory_settings(
     )
 
 
+def router_agent_ids(hass: HomeAssistant) -> set[str]:
+    """Entity ids of every Voice Persona Router. None of them may be a memory agent.
+
+    A router used as memory agent would treat the exchange as a new request, with
+    tools in reach, and two routers could call each other without end.
+    """
+    registry = er.async_get(hass)
+    found = {
+        registry.async_get_entity_id("conversation", DOMAIN, entry.entry_id)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    }
+    return {entity_id for entity_id in found if entity_id}
+
+
 def get_loaded_memory(hass: HomeAssistant) -> MemoryStore | None:
     """The shared store if it is loaded. Never waits, so it is safe in the reply path."""
     loaded: MemoryStore | None = hass.data.get(DOMAIN, {}).get("memory")
@@ -302,14 +361,25 @@ _KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 _SECRET_WORDS = re.compile(
-    r"\b(password|passcode|passphrase|pin|pincode|code|combination|card number|"
-    r"account number|iban|cvv|cvc|social security|ssn)\b",
+    r"\b(?:password|passcode|passphrase|pin|pincode|code|keycode|key code|keypad|"
+    r"combination|combo|secret|token|card number|account number|iban|cvv|cvc|"
+    r"social security|ssn)s?\b",
+    re.IGNORECASE,
+)
+# Words that make any number next to them look like a key, even a date, time or year.
+_KEY_CONTEXT = re.compile(
+    r"\b(?:alarm|door|gate|safe|lock|padlock|vault|garage|unlock)s?\b"
+    r"|\bopen(?:s|ed)? with\b|\bmagic number\b",
+    re.IGNORECASE,
+)
+_NUMBER_WORDS = re.compile(
+    r"(?:\b(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b[\s,.-]*){4,}",
     re.IGNORECASE,
 )
 _DATES_AND_TIMES = re.compile(
     r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b|\b\d{1,2}[:.]\d{2}\b"
 )
-_DIGIT_RUN = re.compile(r"\d(?:[ -]?\d){3,}")
+_DIGIT_RUN = re.compile(r"\d(?:[ .,:/-]?\d){3,}")
 
 EXTRACTION_INSTRUCTIONS = """\
 You keep the long-term memory of a home voice assistant. You are given one exchange \
@@ -322,6 +392,8 @@ Reply with JSON only, in exactly this shape:
 Rules for "add":
 - Save lasting facts about the person: preferences, people in their life, plans with \
 dates, routines, likes and dislikes.
+- Save only what the person said. The assistant's reply is context for understanding \
+it, never a source of facts.
 - "text" is one short sentence in the third person, at most 200 characters.
 - "source" is "told" when the person asked to remember it, otherwise "judged".
 - "scope" is "global" only when the person explicitly asked for every assistant, \
@@ -375,10 +447,14 @@ def should_extract(user_text: str, *, auto_save: bool) -> bool:
 def looks_secret(text: str) -> bool:
     """Whether a fact looks like a password, PIN, code or other number used as a key.
 
-    Any run of 4 or more digits counts, unless it is a date, a time or a year.
+    Any run of 4 or more digits counts, also when spelled out or split by spaces or
+    punctuation, unless it is a date, a time or a year. Next to a word such as alarm,
+    door or safe, dates, times and years count as well. Errs on the side of yes.
     """
-    if _SECRET_WORDS.search(text):
+    if _SECRET_WORDS.search(text) or _NUMBER_WORDS.search(text):
         return True
+    if _KEY_CONTEXT.search(text):
+        return bool(_DIGIT_RUN.search(text))
     for run in _DIGIT_RUN.findall(_DATES_AND_TIMES.sub(" ", text)):
         digits = re.sub(r"\D", "", run)
         if not (len(digits) == 4 and 1900 <= int(digits) <= 2099):
@@ -479,15 +555,19 @@ async def _async_extract(
         if ids:
             removed += [item["text"] for item in await memory.async_remove(key, ids)]
 
+    # Told and global are only believed when the person's own words asked for it.
+    asked = has_memory_keyword(exchange.user_text)
     added: list[str] = []
     for entry in additions:
         text = clean_text(str(entry.get("text") or ""))
         if not text or len(text) > MAX_TEXT_LENGTH or looks_secret(text):
             continue
-        source: Source = "told" if entry.get("source") == "told" else "judged"
-        if source == "judged" and not settings.auto_save:
+        source: Source = "told" if asked and entry.get("source") == "told" else "judged"
+        # With auto-save off a judged fact is only kept as the replacement of a fact
+        # this pass removed, so a corrected fact does not simply vanish.
+        if source == "judged" and not settings.auto_save and not removed:
             continue
-        wants_global = entry.get("scope") == "global" and settings.use_global
+        wants_global = asked and entry.get("scope") == "global" and settings.use_global
         known = memory.items(assistant_key) + (
             memory.items(shared_key) if settings.use_global else []
         )
@@ -498,7 +578,10 @@ async def _async_extract(
             added.append(f"{text} [{'global' if wants_global else 'assistant'}, {source}]")
 
     _LOGGER.debug(
-        "Memory pass for %s: added %s, removed %s", assistant_key, added or "nothing", removed or "nothing"
+        "Memory pass for %s: added %s, removed %s",
+        assistant_key,
+        added or "nothing",
+        removed or "nothing",
     )
 
 

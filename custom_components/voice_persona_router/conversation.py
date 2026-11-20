@@ -50,6 +50,7 @@ from .memory import (
     get_loaded_memory,
     global_key,
     memory_block,
+    router_agent_ids,
     should_extract,
 )
 from .speaker import Role, resolve_speaker
@@ -206,21 +207,26 @@ class PersonaRouter(conversation.ConversationEntity):
     def _memory_settings(self) -> MemorySettings | None:
         """Memory settings of this router, or None when memory is not active."""
         return active_memory_settings(
-            self._entry.options, (self._main_agent(), self.entity_id)
+            self._entry.options,
+            (self._main_agent(), self.entity_id, *router_agent_ids(self.hass)),
         )
 
     def _memory_block(self, who, name, settings: MemorySettings) -> str:
         """What this assistant remembers about one person. Reads memory only, no I/O."""
-        memory = get_loaded_memory(self.hass)
-        if memory is None:
+        try:
+            memory = get_loaded_memory(self.hass)
+            if memory is None:
+                return ""
+            shared = memory.items(global_key(who)) if settings.use_global else []
+            return memory_block(
+                name,
+                memory.items(entry_key(self._entry.entry_id, who)),
+                shared,
+                max_items=settings.max_items,
+            )
+        except Exception:  # noqa: BLE001 - memory must never cost the person their persona
+            _LOGGER.exception("Could not read memory, answering without it")
             return ""
-        shared = memory.items(global_key(who)) if settings.use_global else []
-        return memory_block(
-            name,
-            memory.items(entry_key(self._entry.entry_id, who)),
-            shared,
-            max_items=settings.max_items,
-        )
 
     def _start_memory_pass(self, user_input, resp, result) -> None:
         """Let the memory agent look at a finished turn, in the background.
@@ -248,7 +254,9 @@ class PersonaRouter(conversation.ConversationEntity):
                 language=user_input.language,
                 context=user_input.context,
             )
-            self.hass.async_create_background_task(
+            # Tied to the entry, so the pass is cancelled when the router is removed.
+            self._entry.async_create_background_task(
+                self.hass,
                 async_run_extraction(self.hass, memory, settings, exchange),
                 name=f"{self.entity_id} memory pass",
             )
@@ -352,7 +360,9 @@ class PersonaRouter(conversation.ConversationEntity):
             from homeassistant.helpers.chat_session import async_get_chat_session
 
             with (
-                async_get_chat_session(self.hass, user_input.conversation_id) as session,
+                async_get_chat_session(
+                    self.hass, user_input.conversation_id, context=user_input.context
+                ) as session,
                 async_get_chat_log(self.hass, session, user_input) as own_log,
             ):
                 place = len(own_log.content) - 1
