@@ -1,0 +1,7 @@
+# Development only: the test harness, which pins Home Assistant 2026.11.2.
+pytest-homeassistant==2026.11.2
+# Requirements of Home Assistant's conversation integration in 2026.11.2, which the
+# router depends on. Home Assistant installs these on demand; tests need them up front.
+gazetteer-matcher==1.1.0
+hassil==3.12.1
+home-assistant-intents==2026.10.27
