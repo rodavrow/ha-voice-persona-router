@@ -18,6 +18,13 @@
   "options": {
     "step": {
       "init": {
+        "title": "Voice persona router",
+        "menu_options": {
+          "settings": "Settings",
+          "memory": "Memory"
+        }
+      },
+      "settings": {
         "title": "Voice persona settings",
         "description": "Who is speaking comes from the voice_speaker helper of each satellite (owner, partner or stranger). Requests from the phone app or browser can be matched to the logged-in Home Assistant user instead. Changes apply to the next request, no restart needed.",
         "sections": {
@@ -40,6 +47,24 @@
             "data_description": {
               "enabled": "A request that matches a built-in command exactly is carried out at once, without the main agent. Anything else goes to the main agent.",
               "leave_questions": "State questions such as is the door closed, and play music requests, go to the main agent even when a built-in command matches."
+            }
+          },
+          "memory": {
+            "name": "Memory",
+            "description": "Lets this assistant remember facts about Person 1 and Person 2. What it remembers about one person is only used when that person speaks, and never for an unknown voice. View and edit the facts under Memory in the Configure menu.",
+            "data": {
+              "enabled": "Remember things about the people who live here",
+              "agent": "Agent that decides what to save",
+              "auto_save": "Save important facts without being asked",
+              "max_items": "Most facts kept per list",
+              "use_global": "Use the lists shared by all assistants"
+            },
+            "data_description": {
+              "enabled": "Needs an agent chosen below.",
+              "agent": "Reads each exchange after the reply has been given, so it never slows an answer down. Pick a cheap, fast agent with no tool providers. It may not be the main agent or this router.",
+              "auto_save": "When off, only remember and forget requests change the memory.",
+              "max_items": "Also the most facts shown to the main agent. When a list is full, the oldest facts saved without being asked are dropped first.",
+              "use_global": "Facts are kept per assistant unless the person asks for all assistants to remember them."
             }
           },
           "owner": {
@@ -113,10 +138,27 @@
             }
           }
         }
+      },
+      "memory": {
+        "title": "Memory",
+        "description": "Pick the list of remembered facts to view or edit. Each assistant keeps its own list per person. The lists for all assistants are shared by every router.",
+        "data": {
+          "list": "List"
+        }
+      },
+      "memory_edit": {
+        "title": "Memory",
+        "description": "{list}\n\nOne fact per line. Delete a line to forget it. Type a new line to add one.",
+        "data": {
+          "facts": "Remembered facts"
+        }
       }
     },
     "error": {
-      "same_user": "Person 1 and Person 2 cannot have the same Home Assistant user."
+      "same_user": "Person 1 and Person 2 cannot have the same Home Assistant user.",
+      "memory_agent_required": "Choose an agent that decides what to save, or turn memory off.",
+      "memory_agent_invalid": "The agent that decides what to save may not be the main agent or this router.",
+      "line_too_long": "A fact may be 200 characters at most. This line is too long: {line}"
     }
   }
 }
