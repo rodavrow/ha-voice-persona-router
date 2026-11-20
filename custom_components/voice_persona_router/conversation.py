@@ -233,7 +233,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 return
             if result.response.response_type == intent.IntentResponseType.ERROR:
                 return
-            if not should_extract(user_input.text):
+            if not should_extract(user_input.text, auto_save=settings.auto_save):
                 return
             exchange = Exchange(
                 entry_id=self._entry.entry_id,

@@ -296,6 +296,7 @@ def memory_block(
 # Deciding what to save: a pass that runs after the reply has been returned.
 
 EXTRACTION_TIMEOUT = 20
+MIN_WORDS_FOR_AUTO_SAVE = 4
 _KEYWORDS = re.compile(
     r"\b(remember|forget|memori[sz]e|keep in mind|make a note|note that|should know)\b",
     re.IGNORECASE,
@@ -360,9 +361,15 @@ def has_memory_keyword(text: str) -> bool:
     return bool(_KEYWORDS.search(text or ""))
 
 
-def should_extract(user_text: str) -> bool:
-    """Whether a turn is worth a call to the memory agent."""
-    return has_memory_keyword(user_text)
+def should_extract(user_text: str, *, auto_save: bool) -> bool:
+    """Whether a turn is worth a call to the memory agent.
+
+    A remember or forget request always is. Anything else only with auto-save on,
+    and only when it is long enough to hold a fact.
+    """
+    if has_memory_keyword(user_text):
+        return True
+    return auto_save and len(user_text.split()) >= MIN_WORDS_FOR_AUTO_SAVE
 
 
 def looks_secret(text: str) -> bool:
@@ -478,7 +485,7 @@ async def _async_extract(
         if not text or len(text) > MAX_TEXT_LENGTH or looks_secret(text):
             continue
         source: Source = "told" if entry.get("source") == "told" else "judged"
-        if source == "judged":
+        if source == "judged" and not settings.auto_save:
             continue
         wants_global = entry.get("scope") == "global" and settings.use_global
         known = memory.items(assistant_key) + (
