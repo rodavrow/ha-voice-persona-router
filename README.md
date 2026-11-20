@@ -63,7 +63,7 @@ The helper holds one of these values:
 | Value | Meaning |
 | --- | --- |
 | `owner` | Person 1 in the router settings |
-| `partner` | Person 2 in the router settings (`wife` is accepted as well) |
+| `partner` | Person 2 in the router settings |
 | `stranger` | Anybody else |
 | `pending` | The wake word was heard and the voice match has not arrived yet |
 
