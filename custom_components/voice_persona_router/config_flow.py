@@ -7,9 +7,21 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import DOMAIN
+from .memory import (
+    LineTooLongError,
+    MemoryItem,
+    MemoryStore,
+    async_get_memory,
+    entry_key,
+    global_key,
+)
+
+MEMORY_DEFAULTS = {"enabled": False, "auto_save": True, "max_items": 50, "use_global": True}
+LINE_PREVIEW_LENGTH = 60
 
 DEFAULT_NEAR_PERSONA = (
     "The voice sounded a little like someone who lives here, but you could not be sure. "
@@ -97,6 +109,7 @@ def current_settings(hass, entry):
     return {
         "agents": {"agent": entry.data.get("agent")},
         "local": {"enabled": True, "leave_questions": True},
+        "memory": dict(MEMORY_DEFAULTS),
         "owner": {"persona": str(personas.get("owner") or "")},
         "partner": {"persona": str(personas.get("wife") or "")},
         "strangers": {
@@ -117,6 +130,7 @@ def current_settings(hass, entry):
 def settings_schema(current):
     agents = current.get("agents") or {}
     local = current.get("local") or {}
+    memory = current.get("memory") or {}
     owner = current.get("owner") or {}
     partner = current.get("partner") or {}
     strangers = current.get("strangers") or {}
@@ -133,6 +147,18 @@ def settings_schema(current):
                     {
                         _fixed("enabled", local, True): selector.BooleanSelector(),
                         _fixed("leave_questions", local, True): selector.BooleanSelector(),
+                    }
+                ),
+                {"collapsed": True},
+            ),
+            vol.Required("memory"): section(
+                vol.Schema(
+                    {
+                        _fixed("enabled", memory, False): selector.BooleanSelector(),
+                        _opt("agent", memory): _agent(),
+                        _fixed("auto_save", memory, True): selector.BooleanSelector(),
+                        _fixed("max_items", memory, 50): _number(10, 200, 1),
+                        _fixed("use_global", memory, True): selector.BooleanSelector(),
                     }
                 ),
                 {"collapsed": True},
@@ -202,6 +228,37 @@ def settings_schema(current):
     )
 
 
+def memory_settings_error(settings, other_agents) -> str | None:
+    """Form error key for the Memory section, or None when it is fine.
+
+    `other_agents` are the entity ids the memory agent may not be: the main agent
+    and this router itself.
+    """
+    memory = settings.get("memory") or {}
+    agent = memory.get("agent")
+    if agent and agent in other_agents:
+        return "memory_agent_invalid"
+    if memory.get("enabled") and not agent:
+        return "memory_agent_required"
+    return None
+
+
+def memory_list_choices(memory: MemoryStore, entry_id: str, settings) -> list[tuple[str, str]]:
+    """(list key, label) of the lists one router entry can see, with their item counts."""
+    choices = []
+    for person, settings_key, fallback in (
+        ("owner", "owner", "Person 1"),
+        ("wife", "partner", "Person 2"),
+    ):
+        name = str((settings.get(settings_key) or {}).get("name") or "").strip() or fallback
+        for key, scope in (
+            (entry_key(entry_id, person), "this assistant"),
+            (global_key(person), "all assistants"),
+        ):
+            choices.append((key, f"{name}: {scope} ({len(memory.items(key))})"))
+    return choices
+
+
 class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -225,10 +282,72 @@ class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
 
 
 class PersonaRouterOptionsFlow(OptionsFlow):
+    """Configure dialog: a menu leading to the settings form or the memory editor."""
+
+    def __init__(self) -> None:
+        self._list_key = ""
+        self._list_label = ""
+        # What the memory editor showed, so a save is a diff against it.
+        self._shown: list[MemoryItem] = []
+
     async def async_step_init(self, user_input=None):
+        return self.async_show_menu(step_id="init", menu_options=["settings", "memory"])
+
+    def _other_agents(self, settings) -> set[str]:
+        """Agents the memory agent may not be: the main agent and this router."""
+        registry = er.async_get(self.hass)
+        return {
+            (settings.get("agents") or {}).get("agent"),
+            self.config_entry.data.get("agent"),
+            registry.async_get_entity_id("conversation", DOMAIN, self.config_entry.entry_id),
+        } - {None}
+
+    async def async_step_settings(self, user_input=None):
+        errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            error = memory_settings_error(user_input, self._other_agents(user_input))
+            if error is None:
+                return self.async_create_entry(title="", data=user_input)
+            errors["base"] = error
+        current = user_input or current_settings(self.hass, self.config_entry)
         return self.async_show_form(
-            step_id="init",
-            data_schema=settings_schema(current_settings(self.hass, self.config_entry)),
+            step_id="settings", data_schema=settings_schema(current), errors=errors
+        )
+
+    async def async_step_memory(self, user_input=None):
+        """Pick the list to edit."""
+        memory = await async_get_memory(self.hass)
+        choices = memory_list_choices(
+            memory, self.config_entry.entry_id, self.config_entry.options
+        )
+        if user_input is not None:
+            self._list_key = user_input["list"]
+            self._list_label = dict(choices)[self._list_key]
+            self._shown = memory.items(self._list_key)
+            return await self.async_step_memory_edit()
+        return self.async_show_form(
+            step_id="memory",
+            data_schema=vol.Schema({vol.Required("list"): _choice(choices)}),
+        )
+
+    async def async_step_memory_edit(self, user_input=None):
+        """Edit one list, one fact per line. Saving never touches the entry's options."""
+        errors = {}
+        placeholders = {"list": self._list_label}
+        text = "\n".join(item["text"] for item in self._shown)
+        if user_input is not None:
+            text = str(user_input.get("facts") or "")
+            memory = await async_get_memory(self.hass)
+            try:
+                await memory.async_apply_edit(self._list_key, self._shown, text.splitlines())
+            except LineTooLongError as err:
+                errors["base"] = "line_too_long"
+                placeholders["line"] = f"{err.line[:LINE_PREVIEW_LENGTH]}…"
+            else:
+                return await self.async_step_init()
+        return self.async_show_form(
+            step_id="memory_edit",
+            data_schema=vol.Schema({_opt("facts", {"facts": text}): _text(True)}),
+            errors=errors,
+            description_placeholders=placeholders,
         )
