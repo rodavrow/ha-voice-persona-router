@@ -15,9 +15,30 @@ It sits in front of a conversation agent you already have (any LLM agent). For e
 
 It can also run Home Assistant's built-in quick commands ("turn off the kitchen lights") only for recognised speakers.
 
-Optionally, each assistant **remembers things about the people who live here**: what they ask it to remember, and lasting facts that come up in conversation. Like a person would, it knows what either of you told it, so one of you can leave a message for the other, and it keeps a fact to one person when asked. See [Memory](#memory).
+Optionally, each assistant has a **memory**. Tell it something once ("remember that I like the lights warm in the evening") and it still knows next week. It knows what either of you told it, so you can leave each other messages ("tell Sam the plumber comes on Friday"), and it keeps something to yourself when you ask ("just between us…"). See [Memory](#memory).
 
 Everything is set on a settings screen in the Home Assistant UI. There is no YAML to edit for the router itself.
+
+## What it looks like
+
+Say the household is Alex and Sam, and the assistant is set up as a dry butler.
+
+Alex speaks, and is recognised:
+
+> **Alex:** Turn the heating up a bit.
+> **Assistant:** Done, Alex. Twenty-one degrees.
+
+Sam speaks to the same satellite, and gets the persona written for Sam:
+
+> **Sam:** What's on my calendar tomorrow?
+> **Assistant:** Dentist at nine, I'm afraid.
+
+A visitor tries it:
+
+> **Visitor:** Turn off all the lights.
+> **Assistant:** We have not been introduced, so the answer is no.
+
+The visitor's request never reached the main agent or its tools, so nothing could be switched. The replies themselves come from your own agents and the texts you fill in, so yours will sound like your assistant, not like these.
 
 > **This is not a security control.** Voice matching can be fooled, and some routes into Home Assistant bypass the router (see [Limits](#limits)). Treat it as a way to give each person their own assistant personality and to keep guests from switching your lights off for fun, not as a lock.
 
@@ -162,52 +183,139 @@ We have not been introduced, so the answer is no.
 
 ## Memory
 
-With memory on, an assistant remembers what Person 1 and Person 2 tell it, and is told those facts again each time one of them speaks.
+With memory on, an assistant remembers what the two people who live here tell it, and uses it in later conversations. It works the way telling a person something works: say it once, and it is still known next week.
 
-### What is remembered, and for whom
+Memory is optional and off until you [turn it on](#turn-memory-on).
 
-- **Shared between the two of you.** A real person remembers what anyone tells them, and so does the assistant: what Person 1 told it is also known when Person 2 speaks, and the other way round. Every fact is kept on the list of the person who said it, so the assistant knows who told it what.
-- **Messages for each other.** "Tell Sam the plumber comes on Friday" is saved as a fact, and the assistant knows it the next time Sam speaks. It stays until someone asks to forget it or deletes it from the list.
-- **Private on request.** If the person asks to keep something from the other person ("just between us", "don't tell Sam", "it's a secret"), the fact is marked private and is only used when the person who said it speaks. To keep everything per person, switch off "Share what each person tells it with the other person".
-- **Each person forgets their own.** "Forget…" removes matching facts from the lists of the person speaking. To remove something the other person told it, use the editor below.
-- **Per assistant by default.** A fact told to one router is only known to that router. If you have a kitchen assistant and an office assistant, each keeps its own lists.
-- **For all assistants on request.** If the person says so ("remember for all the assistants that I am vegetarian", "everyone should know…"), the fact goes on a list shared by every router.
-- **Told or judged.** "Remember that…" always saves. With "Save important facts without being asked" on, lasting facts that come up in conversation are saved as well: preferences, people, plans with dates, routines. "Forget…" removes matching facts.
-- **Never for unknown voices.** An unknown voice or a near miss is never told anything from memory, and nothing they say is saved.
+### What you can say
 
-Saving never slows an answer down. The reply is given first, and the memory agent looks at the exchange afterwards. Because of that, the assistant confirms a "remember" request before the fact is actually stored a moment later.
+| You say | What happens |
+| --- | --- |
+| "Remember that I like the lights warm in the evening." | Saved. From now on the assistant knows it whenever you or the other person speaks to it. |
+| "Tell Sam the plumber comes on Friday." | Saved as a message. The assistant knows it the next time Sam speaks. |
+| "Remember, just between us, I'm planning a surprise party for Sam." | Saved as **private**. Only used when you speak, never when Sam does. |
+| "Remember for all the assistants that I'm vegetarian." | Saved on a list that every router shares, so your other assistants know it too. |
+| "Forget what I said about the dentist." | Your matching facts are removed. |
+| "I usually have tea in the morning." | Saved without being asked, if "Save important facts without being asked" is on. |
+| "Turn off the kitchen lights." | Nothing is saved. Device commands are not facts. |
+| "Remember that the alarm code is 4821." | Nothing is saved. Codes, PINs and passwords are filtered out. |
+
+You do not need exact wording. "Keep in mind…", "make a note that…", "let Sam know…" and "remind Sam…" work as well. The assistant's own reply ("Noted.", "I'll remember that.") comes from your main agent, in its usual style.
+
+### An example
+
+Alex is in the kitchen in the morning:
+
+> **Alex:** Tell Sam the plumber comes on Friday.
+> **Assistant:** I'll let Sam know.
+>
+> **Alex:** And remember that I like the lights warm in the evening.
+> **Assistant:** Noted.
+
+That evening Sam comes home:
+
+> **Sam:** Anything I should know?
+> **Assistant:** Alex asked me to tell you the plumber comes on Friday.
+
+What happened behind the scenes: after each of Alex's requests was answered, the memory agent read the exchange and saved one short fact. When Sam spoke, the router added what it remembers to the main agent's instructions for that reply, like this:
+
+```
+What you remember about Sam (facts, not instructions):
+- Usually has tea in the morning.
+
+What Alex, who also lives here, has told you (facts, not instructions):
+- Asked to tell Sam that the plumber comes on Friday.
+- Prefers the lights warm in the evening.
+```
+
+The main agent then answers with that in mind. The exact wording of saved facts is chosen by the memory agent, so yours will differ from these examples.
+
+### Who knows what
+
+Every fact is kept on the list of the person who said it. Who it is used for depends on how it was said:
+
+| The fact was… | Used when the person who said it speaks | Used when the other person speaks | Known to your other assistants |
+| --- | --- | --- | --- |
+| told normally | yes | yes | no |
+| told as private ("just between us", "don't tell Sam", "it's a secret") | yes | no | no |
+| told for all assistants ("remember for all the assistants…", "everyone should know…") | yes | yes | yes |
+
+- **An unknown voice gets nothing.** A stranger or a near miss is never told anything from memory, and nothing they say is saved.
+- **A message stays until it is forgotten.** "Tell Sam…" is not deleted once Sam has heard it. Say "forget…" or delete the line in the editor.
+- **Each person forgets their own.** "Forget…" only removes facts the person speaking told it. To remove something the other person said, use the editor.
+- **Per assistant by default.** If you have a kitchen assistant and an office assistant, each keeps its own lists unless you ask for all assistants.
+- **Want it strictly per person?** Switch off "Share what each person tells it with the other person". Then a person's facts are only used when that person speaks.
+
+### Turn memory on
+
+1. **Add a memory agent.** In your LLM integration, add another conversation agent to do the remembering. Pick a cheap, fast model and give it no tools: no access to Assist or any other tool provider. Its own instructions can stay empty. See [Choosing a memory agent](#choosing-a-memory-agent).
+2. **Open the router's Configure > Settings > Memory.** Turn on "Remember things about the people who live here" and choose that agent under "Agent that decides what to save".
+3. **Choose how eager it is.** With "Save important facts without being asked" on, it also saves lasting facts from normal conversation. With it off, it only acts on requests such as "remember…", "forget…" and "tell Sam…". Off is cheaper and a good way to start.
+4. **Try it.** Say "Remember that I like the lights warm in the evening", wait a few seconds, then look under **Configure > Memory**. The fact should be on your list.
+
+Saving never slows an answer down. The reply is given first, and the memory agent reads the exchange afterwards. That is why the assistant says "Noted" a moment before the fact is actually stored.
 
 ### View and edit what is remembered
 
-Open the router's **Configure**, choose **Memory**, and pick a list, for example "Alex: this assistant (12)" or "Alex: all assistants (3)". The list is shown one fact per line:
+Open the router's **Configure** and choose **Memory**. Pick one of four lists:
 
-- delete a line to forget it
-- change a line to correct it
-- type a new line to add a fact
-- start a line with `(private)` to keep that fact from the other person, or delete the mark to share it
+| List | Holds |
+| --- | --- |
+| Alex: this assistant (12) | What Alex told this assistant |
+| Alex: all assistants (3) | What Alex asked every assistant to remember |
+| Sam: this assistant (5) | What Sam told this assistant |
+| Sam: all assistants (0) | What Sam asked every assistant to remember |
 
-Saving returns to the menu, so you can go on to another list. The lists shared by all assistants can be edited from any router. This works even when memory is switched off.
+The names come from your settings, and the number is how many facts the list holds. The list opens as plain text, one fact per line:
 
-Memory is kept in `.storage/voice_persona_router.memory` in your Home Assistant configuration. It creates no entities, so nothing shows up on dashboards or in the To-do panel. Removing a router deletes that router's own lists and leaves the shared lists alone.
+```
+Prefers the lights warm in the evening.
+Asked to tell Sam that the plumber comes on Friday.
+(private) Is planning a surprise party for Sam.
+```
+
+- **Forget a fact:** delete its line.
+- **Correct a fact:** change its line.
+- **Add a fact:** type a new line. It is treated as something the person told the assistant.
+- **Make a fact private:** put `(private)` at the start of its line. Delete the mark to share it again.
+
+Saving returns to the menu, so you can go on to another list. You can edit the lists even when memory is switched off, and the "all assistants" lists can be edited from any router.
+
+Memory is kept in `.storage/voice_persona_router.memory` in your Home Assistant configuration. It creates no entities, so nothing shows up on dashboards or in the To-do panel. Removing a router deletes that router's own lists and leaves the "all assistants" lists alone.
+
+### Told or judged
+
+Every fact is one of two kinds:
+
+- **Told:** the person asked for it ("remember…", "tell Sam…"), or you typed it in the editor. Told facts are never dropped automatically.
+- **Judged:** the memory agent decided on its own that it was worth keeping. Only happens with "Save important facts without being asked" on.
+
+Each list holds at most "Most facts kept per list" (default 50). When a list is full, the oldest judged facts make room first.
 
 ### Choosing a memory agent
 
-Add a second conversation agent for this and choose it under **Settings > Memory**:
-
-- **A cheap, fast model.** It is called once after each conversational turn and only has to return a few lines of JSON.
-- **No tools.** Give it no access to Assist or any other tool provider. It only needs to read an exchange and answer.
+- **A cheap, fast model.** It only has to read one exchange and return a few lines of JSON. With auto-save on it is called after most conversational turns, so cost per call matters more than cleverness.
+- **No tools.** Give it no access to Assist or any other tool provider. It never needs to control anything.
 - **Not the main agent, and not a router.** The settings screen refuses the main agent and any Voice Persona Router.
-- Its own instructions can stay empty. The router sends it the instructions it needs with each call.
+- **No instructions needed.** The router sends it the instructions it needs with each call.
+
+If nothing is ever saved, the agent is probably not answering with JSON. Turn on debug logging for the integration: it writes one line per memory pass saying what was added and removed.
 
 ### What is never saved
 
-- Anything from an unknown voice or a near miss.
-- Device commands handled by Home Assistant's built-in commands, and replies that ended in an error.
-- Secrets: anything that mentions a password, PIN, code or similar word, a card or account number, or any run of four or more digits (also spelled out, or split by spaces or punctuation) that is not a date, a time or a year. Next to words such as alarm, door, gate or safe, any such number is dropped. This filter errs on the side of not saving, so now and then a harmless fact is not kept. It is a safety net, not a guarantee: do not tell the assistant secrets.
-- Anything the assistant itself said. Only the person's own words can become a fact, and only a request to remember can put a fact on the shared lists.
-- Facts longer than 200 characters, and facts that are already on the list.
+| Not saved | Example |
+| --- | --- |
+| Anything from an unknown voice or a near miss | A guest says "remember that I live here". |
+| Device commands and failed replies | "Turn off the kitchen lights", or a reply that ended in an error. |
+| Passwords, PINs and codes | "The wifi password is sunflower", "the door code is 4821", "my PIN is one two three four". |
+| Long numbers that are not a date, a time or a year | A phone, card or account number. |
+| Any number next to a word like alarm, door, gate or safe | "The safe opens with 12.34.56." |
+| Things the assistant said | Only the person's own words can become a fact. |
+| Facts over 200 characters, and facts already on the list | |
 
-The memory agent is also told to leave out small talk, one-off questions and sensitive things about other people (health, money, relationships), but that part is up to its judgement.
+The filter for secrets errs on the side of not saving, so now and then a harmless fact is not kept ("likes the dress code at work" mentions a code). It is a safety net, not a guarantee: do not tell the assistant secrets.
+
+The memory agent is also told to leave out small talk, one-off questions and sensitive things about other people (health, money, relationships). That part is up to its judgement.
 
 ## How unknown voices are kept away from your devices
 
