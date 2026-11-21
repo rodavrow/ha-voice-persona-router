@@ -40,11 +40,27 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.util import ulid
 
+from .memory import (
+    REMEMBER_RULE,
+    Exchange,
+    MemorySettings,
+    active_memory_settings,
+    async_run_extraction,
+    entry_key,
+    get_loaded_memory,
+    global_key,
+    memory_block,
+    router_agent_ids,
+    should_extract,
+)
+from .speaker import Role, resolve_speaker
+
 _LOGGER = logging.getLogger(__name__)
 SCRIPT_TIMEOUT = 8
 REPLY_AGENT_TIMEOUT = 6
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
+OTHER_PERSON = {"owner": "wife", "wife": "owner"}
 
 
 def _lines(text):
@@ -153,20 +169,16 @@ class PersonaRouter(conversation.ConversationEntity):
             return text
         return labelled
 
-    async def _who_is_speaking(self, device_id, advanced):
-        """Read the voice_speaker helper of the satellite.
+    async def _helper_state(self, device_id, advanced) -> str | None:
+        """Read the voice_speaker helper of the satellite, or None if it has none.
 
-        Returns the role and whether a voice match was seen for it. Waits a
-        little while the helper says pending, because the match lands a few
-        seconds after the wake word.
+        Waits a little while the helper says pending, because the match lands a
+        few seconds after the wake word.
         """
-        fallback = str(advanced.get("no_helper_role") or "owner")
-        if fallback not in ("owner", "wife", "stranger"):
-            fallback = "owner"
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
         if state is None:
-            return fallback, False
+            return None
         try:
             steps = int(float(advanced.get("wait_seconds", 3)) * 10)
         except (TypeError, ValueError):
@@ -177,14 +189,100 @@ class PersonaRouter(conversation.ConversationEntity):
             await asyncio.sleep(0.1)
             state = self.hass.states.get(helper)
             if state is None:
-                return fallback, False
-        # "partner" is accepted as another word for "wife".
-        role = "wife" if state.state == "partner" else state.state
-        if role in ("owner", "wife", "stranger"):
-            return role, True
-        if state.state == "pending":
-            return "stranger", False
-        return fallback, False
+                return None
+        return state.state
+
+    async def _who_is_speaking(self, user_input, settings) -> tuple[Role, bool]:
+        """Return the role and whether a voice match decided it."""
+        advanced = settings.get("advanced") or {}
+        helper_state = await self._helper_state(user_input.device_id, advanced)
+        user_id = user_input.context.user_id if user_input.context else None
+        user_map: list[tuple[Role, str | None]] = [
+            (role, (settings.get(SETTINGS_KEY[role]) or {}).get("user"))
+            for role in ("owner", "wife")
+        ]
+        return resolve_speaker(
+            helper_state, user_id, user_map, advanced.get("no_helper_role")
+        )
+
+    def _memory_settings(self) -> MemorySettings | None:
+        """Memory settings of this router, or None when memory is not active."""
+        return active_memory_settings(
+            self._entry.options,
+            (self._main_agent(), self.entity_id, *router_agent_ids(self.hass)),
+        )
+
+    def _person_name(self, person) -> str:
+        section = self._entry.options.get(SETTINGS_KEY[person]) or {}
+        return str(section.get("name") or "").strip()
+
+    def _memory_block(self, who, name, settings: MemorySettings) -> str:
+        """What this assistant remembers about one person. Reads memory only, no I/O."""
+        try:
+            memory = get_loaded_memory(self.hass)
+            if memory is None:
+                return ""
+
+            def lists(person, shareable_only=False):
+                found = [memory.items(entry_key(self._entry.entry_id, person))]
+                found.append(memory.items(global_key(person)) if settings.use_global else [])
+                if shareable_only:
+                    found = [[i for i in items if not i.get("private")] for items in found]
+                return found
+
+            blocks = [memory_block(name, *lists(who), max_items=settings.max_items)]
+            if settings.shared:
+                # What the other named person told this assistant, unless they asked
+                # to keep it private.
+                other = OTHER_PERSON[who]
+                blocks.append(
+                    memory_block(
+                        self._person_name(other),
+                        *lists(other, shareable_only=True),
+                        max_items=settings.max_items,
+                        other=True,
+                    )
+                )
+            return "\n\n".join(block for block in blocks if block)
+        except Exception:  # noqa: BLE001 - memory must never cost the person their persona
+            _LOGGER.exception("Could not read memory, answering without it")
+            return ""
+
+    def _start_memory_pass(self, user_input, resp, result) -> None:
+        """Let the memory agent look at a finished turn, in the background.
+
+        Only for a recognised person whose turn the main agent answered. The reply
+        never waits for this.
+        """
+        try:
+            if not resp or resp.get("who") not in ("owner", "wife"):
+                return
+            settings = self._memory_settings()
+            memory = get_loaded_memory(self.hass)
+            if settings is None or memory is None:
+                return
+            if result.response.response_type == intent.IntentResponseType.ERROR:
+                return
+            if not should_extract(user_input.text, auto_save=settings.auto_save):
+                return
+            exchange = Exchange(
+                entry_id=self._entry.entry_id,
+                person=resp["who"],
+                name=str(resp.get("label") or ""),
+                other_name=self._person_name(OTHER_PERSON[resp["who"]]),
+                user_text=user_input.text,
+                reply_text=str((result.response.speech.get("plain") or {}).get("speech") or ""),
+                language=user_input.language,
+                context=user_input.context,
+            )
+            # Tied to the entry, so the pass is cancelled when the router is removed.
+            self._entry.async_create_background_task(
+                self.hass,
+                async_run_extraction(self.hass, memory, settings, exchange),
+                name=f"{self.entity_id} memory pass",
+            )
+        except Exception:  # noqa: BLE001 - memory must never block the reply
+            _LOGGER.exception("Could not start the memory pass")
 
     def _last_score(self, device_id):
         """Voice match score of the satellite's last request, if it reports one."""
@@ -203,16 +301,23 @@ class PersonaRouter(conversation.ConversationEntity):
     async def _lookup_from_settings(self, user_input, settings):
         """Work out who is speaking and what to do with them, from the settings screen."""
         advanced = settings.get("advanced") or {}
-        who, matched = await self._who_is_speaking(user_input.device_id, advanced)
+        who, matched = await self._who_is_speaking(user_input, settings)
         rule = str(advanced.get("rule") or "").strip()
 
         if who != "stranger":
             person = settings.get(SETTINGS_KEY[who]) or {}
+            name = str(person.get("name") or "").strip()
+            memory = ""
+            memory_settings = self._memory_settings()
+            if memory_settings is not None:
+                memory = self._memory_block(who, name, memory_settings)
+                rule = "\n".join(part for part in (rule, REMEMBER_RULE) if part)
             return {
                 "who": who,
                 "persona_for_this_message": str(person.get("persona") or "").strip(),
+                "memory": memory,
                 "rule": rule,
-                "label": str(person.get("name") or "").strip(),
+                "label": name,
                 "fixed_replies": [],
                 "reply_agent": "",
             }
@@ -276,7 +381,9 @@ class PersonaRouter(conversation.ConversationEntity):
             from homeassistant.helpers.chat_session import async_get_chat_session
 
             with (
-                async_get_chat_session(self.hass, user_input.conversation_id) as session,
+                async_get_chat_session(
+                    self.hass, user_input.conversation_id, context=user_input.context
+                ) as session,
                 async_get_chat_log(self.hass, session, user_input) as own_log,
             ):
                 place = len(own_log.content) - 1
@@ -315,7 +422,12 @@ class PersonaRouter(conversation.ConversationEntity):
             else:
                 resp = await self._lookup_from_script(user_input)
             if resp:
-                parts = [resp.get("persona_for_this_message"), resp.get("rule"), extra]
+                parts = [
+                    resp.get("persona_for_this_message"),
+                    resp.get("memory"),
+                    resp.get("rule"),
+                    extra,
+                ]
                 extra = "\n\n".join(p for p in parts if p) or None
         except Exception:  # noqa: BLE001 - a failed lookup must never block the reply
             resp = None
@@ -357,7 +469,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 if handled is not None:
                     return handled
 
-        return await conversation.async_converse(
+        result = await conversation.async_converse(
             self.hass,
             text=text,
             conversation_id=user_input.conversation_id,
@@ -368,3 +480,5 @@ class PersonaRouter(conversation.ConversationEntity):
             satellite_id=user_input.satellite_id,
             extra_system_prompt=extra,
         )
+        self._start_memory_pass(user_input, resp, result)
+        return result
